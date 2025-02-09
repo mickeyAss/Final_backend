@@ -40,14 +40,13 @@ router.post("/login", (req, res) => {
             if (result.length === 0) {
                 return res.status(404).json({ error: 'User not found' });
             }
-
-            if (email !== user.email) {
-                return res.status(402).json({ error: 'Invalid email ' });
-            }
-
             const user = result[0];
             if (password !== user.password) {
                 return res.status(401).json({ error: 'Invalid  password' });
+            }
+
+            if (email !== user.email) {
+                return res.status(402).json({ error: 'Invalid email ' });
             }
 
             res.status(200).json({ message: 'Login successful', user });
