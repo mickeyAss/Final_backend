@@ -38,21 +38,20 @@ router.post("/login", (req, res) => {
 
             // ตรวจสอบว่าพบผู้ใช้หรือไม่
             if (result.length === 0) {
-                return res.status(404).json({ error: 'User not found' });
+                return res.status(404).json({ error: 'User not found' }); // อีเมลไม่ถูกต้อง
             }
+
             const user = result[0];
+
             if (password !== user.password) {
-                return res.status(401).json({ error: 'Invalid  password' });
+                return res.status(401).json({ error: 'Invalid password' }); // รหัสผ่านผิด
             }
 
-            if (email !== user.email) {
-                return res.status(402).json({ error: 'Invalid email ' });
-            }
-
-            res.status(200).json({ message: 'Login successful', user });
+            // ถ้า email และ password ถูกต้อง
+            return res.status(200).json({ message: 'Login successful', user });
         });
     } catch (err) {
         console.error(err);
         return res.status(500).json({ error: 'Server error' });
-    }  
+    }
 });
