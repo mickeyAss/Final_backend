@@ -60,8 +60,7 @@ router.post("/register", (req, res) => {
     const {
         name, email, password,
         height, weight, shirt_size,
-        chest, waist_circumference, hip,
-        personal_description, profile_image
+        chest, waist_circumference, hip
     } = req.body;
 
     if (!name || !email || !password) {
@@ -72,16 +71,14 @@ router.post("/register", (req, res) => {
         INSERT INTO user (
             name, email, password,
             height, weight, shirt_size,
-            chest, waist_circumference, hip,
-            personal_description, profile_image
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            chest, waist_circumference, hip
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const values = [
         name, email, password,
         height, weight, shirt_size,
-        chest, waist_circumference, hip,
-        personal_description, profile_image
+        chest, waist_circumference, hip
     ];
 
     try {
