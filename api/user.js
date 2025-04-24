@@ -55,3 +55,46 @@ router.post("/login", (req, res) => {
         return res.status(500).json({ error: 'Server error' });
     }
 });
+
+router.post("/register", (req, res) => {
+    const {
+        name, email, password,
+        height, weight, shirt_size,
+        chest, waist_circumference, hip,
+        personal_description, profile_image
+    } = req.body;
+
+    if (!name || !email || !password) {
+        return res.status(400).json({ error: 'Name, email and password are required' });
+    }
+
+    const sql = `
+        INSERT INTO user (
+            name, email, password,
+            height, weight, shirt_size,
+            chest, waist_circumference, hip,
+            personal_description, profile_image
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+
+    const values = [
+        name, email, password,
+        height, weight, shirt_size,
+        chest, waist_circumference, hip,
+        personal_description, profile_image
+    ];
+
+    try {
+        conn.query(sql, values, (err, result) => {
+            if (err) {
+                console.error(err);
+                return res.status(500).json({ error: 'Database insert error' });
+            }
+
+            return res.status(201).json({ message: 'User registered successfully', uid: result.insertId });
+        });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ error: 'Server error' });
+    }
+});
