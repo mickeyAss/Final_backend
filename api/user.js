@@ -104,7 +104,7 @@ router.get("/get/:uid", (req, res) => {
     }
 
     try {
-        conn.query("SELECT * FROM user WHERE id = ?", [uid], (err, result) => {
+        conn.query("SELECT * FROM user WHERE uid = ?", [uid], (err, result) => {
             if (err) {
                 console.error(err);
                 return res.status(500).json({ error: 'Database query error' });
