@@ -95,3 +95,29 @@ router.post("/register", (req, res) => {
         return res.status(500).json({ error: 'Server error' });
     }
 });
+
+router.get("/get/:uid", (req, res) => {
+    const uid = req.params.uid;
+
+    if (!uid) {
+        return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    try {
+        conn.query("SELECT * FROM user WHERE id = ?", [uid], (err, result) => {
+            if (err) {
+                console.error(err);
+                return res.status(500).json({ error: 'Database query error' });
+            }
+
+            if (result.length === 0) {
+                return res.status(404).json({ error: 'User not found' });
+            }
+
+            return res.status(200).json(result[0]); // ส่งข้อมูลผู้ใช้ที่เจอ
+        });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ error: 'Server error' });
+    }
+});
