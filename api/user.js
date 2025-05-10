@@ -7,7 +7,7 @@ module.exports = router;
 //เส้น Api ดึงข้อมูลทั้งหมดจากเทเบิ้ล user
 router.get("/get", (req, res) => {
     try {
-        conn.query("SELECT * FROM user", (err, result) => {
+        conn.query("SELECT * FROM user ORDER BY RAND()", (err, result) => {
             if (err) {
                 console.log(err);
                 return res.status(400).json({ error: 'Query error' });
@@ -15,7 +15,7 @@ router.get("/get", (req, res) => {
             if (result.length === 0) {
                 return res.status(404).json({ error: 'No users found' });
             }
-            res.status(200).json(result); // ส่งข้อมูลผู้ใช้ทั้งหมด
+            res.status(200).json(result); // ส่งข้อมูลผู้ใช้ทั้งหมด แบบสุ่ม
         });
     } catch (err) {
         console.log(err);
