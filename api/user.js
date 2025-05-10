@@ -4,6 +4,7 @@ var conn = require('../dbconnect')
 
 module.exports = router;
 
+//เส้น Api ดึงข้อมูลทั้งหมดจากเทเบิ้ล user
 router.get("/get", (req, res) => {
     try {
         conn.query("SELECT * FROM user", (err, result) => {
@@ -22,6 +23,7 @@ router.get("/get", (req, res) => {
     }
 });
 
+//เส้น Api เข้าสู่ระบบ user
 router.post("/login", (req, res) => {
     const { email, password } = req.body;
 
@@ -56,7 +58,9 @@ router.post("/login", (req, res) => {
     }
 });
 
-router.post("/register", (req, res) => {
+const bcrypt = require('bcrypt'); // ต้องติดตั้งก่อน: npm install bcrypt
+//เส้น Api สมัครสมาชิก user
+router.post("/register", async (req, res) => {
     const {
         name, email, password,
         height, weight, shirt_size,
@@ -64,38 +68,49 @@ router.post("/register", (req, res) => {
     } = req.body;
 
     if (!name || !email || !password) {
-        return res.status(400).json({ error: 'Name, email and password are required' });
+        return res.status(400).json({ error: 'กรุณากรอกชื่อ อีเมล และรหัสผ่านให้ครบถ้วน' });
     }
 
-    const sql = `
-        INSERT INTO user (
-            name, email, password,
-            height, weight, shirt_size,
-            chest, waist_circumference, hip
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-
-    const values = [
-        name, email, password,
-        height, weight, shirt_size,
-        chest, waist_circumference, hip
-    ];
+    // ตรวจสอบรหัสผ่าน (ไม่รวมอักขระพิเศษ)
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
+    if (!passwordRegex.test(password)) {
+        return res.status(400).json({
+            error: 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร และประกอบด้วยตัวพิมพ์ใหญ่ ตัวพิมพ์เล็ก และตัวเลข'
+        });
+    }
 
     try {
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        const sql = `
+            INSERT INTO user (
+                name, email, password,
+                height, weight, shirt_size,
+                chest, waist_circumference, hip
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+
+        const values = [
+            name, email, hashedPassword,
+            height, weight, shirt_size,
+            chest, waist_circumference, hip
+        ];
+
         conn.query(sql, values, (err, result) => {
             if (err) {
                 console.error(err);
-                return res.status(500).json({ error: 'Database insert error' });
+                return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการบันทึกข้อมูลผู้ใช้' });
             }
 
-            return res.status(201).json({ message: 'User registered successfully', uid: result.insertId });
+            return res.status(201).json({ message: 'สมัครสมาชิกเรียบร้อยแล้ว', uid: result.insertId });
         });
     } catch (err) {
         console.error(err);
-        return res.status(500).json({ error: 'Server error' });
+        return res.status(500).json({ error: 'เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์' });
     }
 });
 
+//เส้น Api ดึงข้อมูลทั้งหมดของ user ตาม uid
 router.get("/get/:uid", (req, res) => {
     const uid = req.params.uid;
 

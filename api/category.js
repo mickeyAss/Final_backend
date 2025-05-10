@@ -4,6 +4,7 @@ var conn = require('../dbconnect')
 
 module.exports = router;
 
+//เส้น Api ดึงข้อมูลทั้งหมดจากเทเบิ้ล categor หรือเทเบิ้ล หมวดหมู่
 router.get("/get", (req, res) => {
     try {
         conn.query("SELECT * FROM category", (err, result) => {

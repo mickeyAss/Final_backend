@@ -4,6 +4,7 @@ var conn = require('../dbconnect')
 
 module.exports = router;
 
+//เส้น Api ดึงข้อมูลทั้งหมดจากเทเบิ้ล post และเทเบิ้ล image
 router.get("/get", (req, res) => {
     try {
         const postId = 4; // หรือ req.query.post_id ก็ได้หากรับจาก client
