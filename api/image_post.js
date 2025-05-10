@@ -7,15 +7,16 @@ module.exports = router;
 //เส้น Api ดึงข้อมูลทั้งหมดจากเทเบิ้ล post และเทเบิ้ล image และ user
 router.get("/get", (req, res) => {
     try {
-        // JOIN post กับ user
         const postSql = `
             SELECT 
                 post.*, 
                 user.uid, user.name, user.email, user.height, user.weight, 
                 user.shirt_size, user.chest, user.waist_circumference, 
-                user.hip, user.personal_description, user.profile_image
+                user.hip, user.personal_description, user.profile_image,
+                category.cid, category.cname, category.cimage, category.ctype
             FROM post
             JOIN user ON post.post_fk_uid = user.uid
+            JOIN category ON post.post_fk_cid = category.cid
         `;
 
         conn.query(postSql, (err, postResults) => {
@@ -28,7 +29,6 @@ router.get("/get", (req, res) => {
                 return res.status(404).json({ error: 'No posts found' });
             }
 
-            // ดึงภาพทั้งหมดจาก image_post
             const imageSql = `SELECT * FROM image_post`;
             conn.query(imageSql, (err, imageResults) => {
                 if (err) {
@@ -36,7 +36,6 @@ router.get("/get", (req, res) => {
                     return res.status(400).json({ error: 'Image query error' });
                 }
 
-                // รวมโพสต์ + ผู้ใช้ + รูปภาพ
                 const postsWithImages = postResults.map(post => {
                     const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
                     return {
@@ -64,6 +63,12 @@ router.get("/get", (req, res) => {
                             personal_description: post.personal_description,
                             profile_image: post.profile_image
                         },
+                        category: {
+                            cid: post.cid,
+                            cname: post.cname,
+                            cimage: post.cimage,
+                            ctype: post.ctype
+                        },
                         images
                     };
                 });
@@ -76,6 +81,7 @@ router.get("/get", (req, res) => {
         return res.status(500).json({ error: 'Server error' });
     }
 });
+
 
 
 
