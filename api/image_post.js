@@ -4,11 +4,20 @@ var conn = require('../dbconnect')
 
 module.exports = router;
 
-//เส้น Api ดึงข้อมูลทั้งหมดจากเทเบิ้ล post และเทเบิ้ล image
+//เส้น Api ดึงข้อมูลทั้งหมดจากเทเบิ้ล post และเทเบิ้ล image และ user
 router.get("/get", (req, res) => {
     try {
-        // ดึงข้อมูลโพสต์ทั้งหมด
-        const postSql = `SELECT * FROM post`;
+        // JOIN post กับ user
+        const postSql = `
+            SELECT 
+                post.*, 
+                user.uid, user.name, user.email, user.height, user.weight, 
+                user.shirt_size, user.chest, user.waist_circumference, 
+                user.hip, user.personal_description, user.profile_image
+            FROM post
+            JOIN user ON post.post_fk_uid = user.uid
+        `;
+
         conn.query(postSql, (err, postResults) => {
             if (err) {
                 console.log(err);
@@ -19,7 +28,7 @@ router.get("/get", (req, res) => {
                 return res.status(404).json({ error: 'No posts found' });
             }
 
-            // ดึงข้อมูลภาพทั้งหมด
+            // ดึงภาพทั้งหมดจาก image_post
             const imageSql = `SELECT * FROM image_post`;
             conn.query(imageSql, (err, imageResults) => {
                 if (err) {
@@ -27,11 +36,34 @@ router.get("/get", (req, res) => {
                     return res.status(400).json({ error: 'Image query error' });
                 }
 
-                // จับคู่โพสต์กับรูปภาพ
+                // รวมโพสต์ + ผู้ใช้ + รูปภาพ
                 const postsWithImages = postResults.map(post => {
                     const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
                     return {
-                        post,
+                        post: {
+                            post_id: post.post_id,
+                            post_topic: post.post_topic,
+                            post_description: post.post_description,
+                            amount_of_like: post.amount_of_like,
+                            amount_of_save: post.amount_of_save,
+                            amount_of_comment: post.amount_of_comment,
+                            post_date: post.post_date,
+                            post_fk_cid: post.post_fk_cid,
+                            post_fk_uid: post.post_fk_uid,
+                        },
+                        user: {
+                            uid: post.uid,
+                            name: post.name,
+                            email: post.email,
+                            height: post.height,
+                            weight: post.weight,
+                            shirt_size: post.shirt_size,
+                            chest: post.chest,
+                            waist_circumference: post.waist_circumference,
+                            hip: post.hip,
+                            personal_description: post.personal_description,
+                            profile_image: post.profile_image
+                        },
                         images
                     };
                 });
@@ -44,5 +76,6 @@ router.get("/get", (req, res) => {
         return res.status(500).json({ error: 'Server error' });
     }
 });
+
 
 
