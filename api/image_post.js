@@ -103,19 +103,20 @@ router.get("/get", (req, res) => {
 
 // เส้น API สำหรับอัปเดตจำนวนไลค์ของโพสต์
 router.post("/like/:post_id", (req, res) => {
-    const post_id = req.params.post_id;  // รับจาก path parameter
+    const post_id = req.params.post_id;
+    const { isLiked } = req.body; // รับสถานะจาก client ว่าปัจจุบันถูกไลก์อยู่ไหม
 
-    if (!post_id) {
-        return res.status(400).json({ error: 'post_id is required' });
+    if (!post_id || typeof isLiked !== 'boolean') {
+        return res.status(400).json({ error: 'post_id and isLiked(boolean) are required' });
     }
 
-    const updateLikeSql = `
+    const updateSql = `
         UPDATE post 
-        SET amount_of_like = amount_of_like + 1 
+        SET amount_of_like = amount_of_like ${isLiked ? '- 1' : '+ 1'} 
         WHERE post_id = ?
     `;
 
-    conn.query(updateLikeSql, [post_id], (err, result) => {
+    conn.query(updateSql, [post_id], (err, result) => {
         if (err) {
             console.log(err);
             return res.status(500).json({ error: 'Failed to update like count' });
@@ -125,7 +126,10 @@ router.post("/like/:post_id", (req, res) => {
             return res.status(404).json({ error: 'Post not found' });
         }
 
-        res.status(200).json({ message: 'Like updated successfully' });
+        res.status(200).json({ 
+            message: isLiked ? 'Unliked' : 'Liked', 
+            liked: !isLiked 
+        });
     });
 });
 
