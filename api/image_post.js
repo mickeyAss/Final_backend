@@ -101,6 +101,39 @@ router.get("/get", (req, res) => {
     }
 });
 
+// เส้น API สำหรับอัปเดตจำนวนไลค์ของโพสต์
+router.post("/like", (req, res) => {
+    const { post_id } = req.body;
+
+    if (!post_id) {
+        return res.status(400).json({ error: 'post_id is required' });
+    }
+
+    const updateLikeSql = `
+        UPDATE post 
+        SET amount_of_like = amount_of_like + 1 
+        WHERE post_id = ?
+    `;
+
+    conn.query(updateLikeSql, [post_id], (err, result) => {
+        if (err) {
+            console.log(err);
+            return res.status(500).json({ error: 'Failed to update like count' });
+        }
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ error: 'Post not found' });
+        }
+
+        res.status(200).json({ message: 'Like updated successfully' });
+    });
+});
+
+
+
+
+
+
 
 
 
