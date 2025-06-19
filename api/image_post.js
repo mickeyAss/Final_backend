@@ -102,8 +102,8 @@ router.get("/get", (req, res) => {
 });
 
 // เส้น API สำหรับอัปเดตจำนวนไลค์ของโพสต์
-router.post("/like", (req, res) => {
-    const { post_id } = req.body;
+router.post("/like/:post_id", (req, res) => {
+    const post_id = req.params.post_id;  // รับจาก path parameter
 
     if (!post_id) {
         return res.status(400).json({ error: 'post_id is required' });
@@ -128,6 +128,7 @@ router.post("/like", (req, res) => {
         res.status(200).json({ message: 'Like updated successfully' });
     });
 });
+
 
 
 
