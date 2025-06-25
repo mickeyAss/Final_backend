@@ -67,11 +67,12 @@ router.post("/register", async (req, res) => {
         chest, waist_circumference, hip
     } = req.body;
 
+    const defaultProfileImage = 'https://i.pinimg.com/736x/b3/6a/cb/b36acb54b3b83e0f285829e004b0a916.jpg';
+
     if (!name || !email || !password) {
         return res.status(400).json({ error: 'กรุณากรอกชื่อ อีเมล และรหัสผ่านให้ครบถ้วน' });
     }
 
-    // ตรวจสอบรหัสผ่าน (ไม่รวมอักขระพิเศษ)
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
     if (!passwordRegex.test(password)) {
         return res.status(400).json({
@@ -86,14 +87,16 @@ router.post("/register", async (req, res) => {
             INSERT INTO user (
                 name, email, password,
                 height, weight, shirt_size,
-                chest, waist_circumference, hip
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                chest, waist_circumference, hip,
+                profile_image
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
 
         const values = [
             name, email, hashedPassword,
             height, weight, shirt_size,
-            chest, waist_circumference, hip
+            chest, waist_circumference, hip,
+            defaultProfileImage
         ];
 
         conn.query(sql, values, (err, result) => {
@@ -109,6 +112,7 @@ router.post("/register", async (req, res) => {
         return res.status(500).json({ error: 'เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์' });
     }
 });
+
 
 //เส้น Api ดึงข้อมูลทั้งหมดของ user ตาม uid
 router.get("/get/:uid", (req, res) => {
