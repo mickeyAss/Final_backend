@@ -24,6 +24,8 @@ router.get("/get", (req, res) => {
 });
 
 //เส้น Api เข้าสู่ระบบ user
+const bcrypt = require('bcrypt'); // ต้องติดตั้งก่อน: npm install bcrypt
+
 router.post("/login", (req, res) => {
     const { email, password } = req.body;
 
@@ -32,24 +34,26 @@ router.post("/login", (req, res) => {
     }
 
     try {
-        conn.query("SELECT * FROM user WHERE email = ?", [email], (err, result) => {
+        conn.query("SELECT * FROM user WHERE email = ?", [email], async (err, result) => {
             if (err) {
                 console.error(err);
                 return res.status(500).json({ error: 'Database query error' });
             }
 
-            // ตรวจสอบว่าพบผู้ใช้หรือไม่
             if (result.length === 0) {
-                return res.status(404).json({ error: 'User not found' }); // อีเมลไม่ถูกต้อง
+                return res.status(404).json({ error: 'User not found' });
             }
 
             const user = result[0];
 
-            if (password !== user.password) {
-                return res.status(401).json({ error: 'Invalid password' }); // รหัสผ่านผิด
+            // ✅ เปรียบเทียบ password ที่กรอก กับ hash ที่เก็บไว้
+            const isMatch = await bcrypt.compare(password, user.password);
+
+            if (!isMatch) {
+                return res.status(401).json({ error: 'Invalid password' });
             }
 
-            // ถ้า email และ password ถูกต้อง
+            // ล็อกอินสำเร็จ
             return res.status(200).json({ message: 'Login successful', user });
         });
     } catch (err) {
@@ -58,7 +62,6 @@ router.post("/login", (req, res) => {
     }
 });
 
-const bcrypt = require('bcrypt'); // ต้องติดตั้งก่อน: npm install bcrypt
 //เส้น Api สมัครสมาชิก user
 router.post("/register", async (req, res) => {
     const {
