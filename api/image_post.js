@@ -8,14 +8,15 @@ module.exports = router;
 router.get("/get", (req, res) => {
     try {
         const postSql = `
-            SELECT 
-                post.*, 
-                user.uid, user.name, user.email, user.height, user.weight, 
-                user.shirt_size, user.chest, user.waist_circumference, 
-                user.hip, user.personal_description, user.profile_image
-            FROM post
-            JOIN user ON post.post_fk_uid = user.uid
-        `;
+    SELECT 
+        post.*, 
+        user.uid, user.name, user.email, user.height, user.weight, 
+        user.shirt_size, user.chest, user.waist_circumference, 
+        user.hip, user.personal_description, user.profile_image
+    FROM post
+    JOIN user ON post.post_fk_uid = user.uid
+    ORDER BY post.post_date DESC
+`;
 
         conn.query(postSql, (err, postResults) => {
             if (err) {
@@ -126,9 +127,9 @@ router.post("/like/:post_id", (req, res) => {
             return res.status(404).json({ error: 'Post not found' });
         }
 
-        res.status(200).json({ 
-            message: isLiked ? 'Unliked' : 'Liked', 
-            liked: !isLiked 
+        res.status(200).json({
+            message: isLiked ? 'Unliked' : 'Liked',
+            liked: !isLiked
         });
     });
 });
