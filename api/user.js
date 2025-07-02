@@ -71,7 +71,7 @@ router.post("/register", async (req, res) => {
         personal_description
     } = req.body;
 
-    const defaultProfileImage = 'https://i.pinimg.com/736x/b3/6a/cb/b36acb54b3b83e0f285829e004b0a916.jpg';
+    const defaultProfileImage = 'https://pic.onlinewebfonts.com/thumbnails/icons_415941.svg';
 
     if (!name || !email || !password) {
         return res.status(400).json({ error: 'กรุณากรอกชื่อ อีเมล และรหัสผ่านให้ครบถ้วน' });
@@ -87,8 +87,6 @@ router.post("/register", async (req, res) => {
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        const description = personal_description ?? ''; // ✅ ถ้า null หรือ undefined ให้ใช้ ''
-
         const sql = `
             INSERT INTO user (
                 name, email, password,
@@ -102,7 +100,7 @@ router.post("/register", async (req, res) => {
             name, email, hashedPassword,
             height, weight, shirt_size,
             chest, waist_circumference, hip,
-            description, // ✅ เพิ่มตรงนี้
+            personal_description,
             defaultProfileImage
         ];
 
@@ -119,7 +117,6 @@ router.post("/register", async (req, res) => {
         return res.status(500).json({ error: 'เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์' });
     }
 });
-
 
 
 //เส้น Api ดึงข้อมูลทั้งหมดของ user ตาม uid
