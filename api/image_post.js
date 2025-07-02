@@ -134,6 +134,59 @@ router.post("/like/:post_id", (req, res) => {
     });
 });
 
+// API เพิ่มโพสต์พร้อมรูปภาพ
+router.post('/post/add', (req, res) => {
+  const { post_topic, post_description, post_fk_uid, images } = req.body;
+
+  // ตรวจสอบข้อมูลที่จำเป็น
+  if (!post_topic || !post_description || !post_fk_uid || !Array.isArray(images)) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  // 1. Insert ลงตาราง post
+  const insertPostSql = `
+    INSERT INTO post (post_topic, post_description, post_date, post_fk_uid)
+    VALUES (?, ?, NOW(), ?)
+  `;
+
+  conn.query(insertPostSql, [post_topic, post_description, post_fk_uid], (err, postResult) => {
+    if (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Failed to insert post' });
+    }
+
+    const insertedPostId = postResult.insertId;
+
+    // ถ้าไม่มีรูป ให้ตอบกลับเลย
+    if (images.length === 0) {
+      return res.status(201).json({ message: 'Post inserted without images' });
+    }
+
+    // 2. Insert รูปภาพหลายรายการ
+    const insertImageSql = `
+      INSERT INTO image_post (image, image_fk_postid)
+      VALUES ?
+    `;
+
+    // เตรียมข้อมูลรูปภาพในรูปแบบ [[image1, postid], [image2, postid], ...]
+    const imageValues = images.map((url) => [url, insertedPostId]);
+
+    conn.query(insertImageSql, [imageValues], (err, imageResult) => {
+      if (err) {
+        console.error(err);
+        return res.status(500).json({ error: 'Failed to insert images' });
+      }
+
+      res.status(201).json({
+        message: 'Post and images inserted successfully',
+        post_id: insertedPostId,
+        images_count: imageValues.length,
+      });
+    });
+  });
+});
+
+
 
 
 
