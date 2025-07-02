@@ -136,14 +136,18 @@ router.post("/like/:post_id", (req, res) => {
 
 // API เพิ่มโพสต์พร้อมรูปภาพ
 router.post('/post/add', (req, res) => {
-  const { post_topic, post_description, post_fk_uid, images } = req.body;
+  let { post_topic, post_description, post_fk_uid, images } = req.body;
 
-  // ตรวจสอบข้อมูลที่จำเป็น
-  if (!post_topic || !post_description || !post_fk_uid || !Array.isArray(images)) {
+  // ✅ แปลงค่าว่างเป็น null (กรณีส่งมาว่างเปล่า)
+  post_topic = post_topic?.trim() === '' ? null : post_topic;
+  post_description = post_description?.trim() === '' ? null : post_description;
+
+  // ✅ ตรวจสอบแค่ uid และ images เป็น array
+  if (!post_fk_uid || !Array.isArray(images)) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
-  // 1. Insert ลงตาราง post
+  // ✅ Insert ลงตาราง post โดย post_topic, post_description เป็น null ได้
   const insertPostSql = `
     INSERT INTO post (post_topic, post_description, post_date, post_fk_uid)
     VALUES (?, ?, NOW(), ?)
@@ -157,18 +161,14 @@ router.post('/post/add', (req, res) => {
 
     const insertedPostId = postResult.insertId;
 
-    // ถ้าไม่มีรูป ให้ตอบกลับเลย
     if (images.length === 0) {
       return res.status(201).json({ message: 'Post inserted without images' });
     }
 
-    // 2. Insert รูปภาพหลายรายการ
     const insertImageSql = `
       INSERT INTO image_post (image, image_fk_postid)
       VALUES ?
     `;
-
-    // เตรียมข้อมูลรูปภาพในรูปแบบ [[image1, postid], [image2, postid], ...]
     const imageValues = images.map((url) => [url, insertedPostId]);
 
     conn.query(insertImageSql, [imageValues], (err, imageResult) => {
@@ -185,6 +185,7 @@ router.post('/post/add', (req, res) => {
     });
   });
 });
+
 
 
 
