@@ -310,23 +310,27 @@ router.get('/by-category/:cid', (req, res) => {
       return res.status(404).json({ error: 'No posts found for this category' });
     }
 
-    const imageSql = `SELECT * FROM image_post`;
-    conn.query(imageSql, (err, imageResults) => {
+    const postIds = postResults.map(post => post.post_id);
+
+    // ดึงรูปภาพทั้งหมด
+    const imageSql = `SELECT * FROM image_post WHERE image_fk_postid IN (?)`;
+    conn.query(imageSql, [postIds], (err, imageResults) => {
       if (err) {
         console.error(err);
         return res.status(500).json({ error: 'Image query error' });
       }
 
+      // ✅ ดึงหมวดหมู่ทั้งหมดของโพสต์ที่ match cid
       const categorySql = `
         SELECT 
           pc.post_id_fk, 
           c.cid, c.cname, c.cimage, c.ctype
         FROM post_category pc
         JOIN category c ON pc.category_id_fk = c.cid
-        WHERE c.cid = ?
+        WHERE pc.post_id_fk IN (?)
       `;
 
-      conn.query(categorySql, [cid], (err, categoryResults) => {
+      conn.query(categorySql, [postIds], (err, categoryResults) => {
         if (err) {
           console.error(err);
           return res.status(500).json({ error: 'Category query error' });
@@ -378,6 +382,7 @@ router.get('/by-category/:cid', (req, res) => {
     });
   });
 });
+
 
 
 
