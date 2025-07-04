@@ -72,7 +72,7 @@ router.post("/register", async (req, res) => {
         category_ids // สมมติรับมาจาก request body เป็น array เช่น [1, 2, 3]
     } = req.body;
 
-    const defaultProfileImage = 'https://pic.onlinewebfonts.com/thumbnails/icons_415941.svg';
+    const defaultProfileImage = 'https://firebasestorage.googleapis.com/v0/b/final-project-2f65c.firebasestorage.app/o/final_image%2Favatar.png?alt=media&token=8c81feb3-eeaa-44c5-bbfa-342d40a92333';
 
     if (!name || !email || !password) {
         return res.status(400).json({ error: 'กรุณากรอกชื่อ อีเมล และรหัสผ่านให้ครบถ้วน' });
