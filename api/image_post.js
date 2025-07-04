@@ -186,6 +186,88 @@ router.post('/post/add', (req, res) => {
   });
 });
 
+// ดึงโพสต์ทั้งหมดของ user ตาม uid
+router.get("/by-user/:uid", (req, res) => {
+  const { uid } = req.params;
+
+  if (!uid) {
+    return res.status(400).json({ error: "Missing uid in path" });
+  }
+
+  const postSql = `
+    SELECT post.* 
+    FROM post
+    JOIN user ON post.post_fk_uid = user.uid
+    WHERE user.uid = ?
+    ORDER BY post.post_date DESC
+  `;
+
+  conn.query(postSql, [uid], (err, postResults) => {
+    if (err) {
+      console.error(err);
+      return res.status(500).json({ error: "Post query error" });
+    }
+
+    if (postResults.length === 0) {
+      return res.status(404).json({ error: "No posts found for this user" });
+    }
+
+    const imageSql = `SELECT * FROM image_post`;
+    conn.query(imageSql, (err, imageResults) => {
+      if (err) {
+        console.error(err);
+        return res.status(500).json({ error: "Image query error" });
+      }
+
+      const categorySql = `
+        SELECT 
+          pc.post_id_fk, 
+          c.cid, c.cname, c.cimage, c.ctype
+        FROM post_category pc
+        JOIN category c ON pc.category_id_fk = c.cid
+      `;
+
+      conn.query(categorySql, (err, categoryResults) => {
+        if (err) {
+          console.error(err);
+          return res.status(500).json({ error: "Category query error" });
+        }
+
+        const postsWithData = postResults.map((post) => {
+          const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
+          const categories = categoryResults
+            .filter(cat => cat.post_id_fk === post.post_id)
+            .map(cat => ({
+              cid: cat.cid,
+              cname: cat.cname,
+              cimage: cat.cimage,
+              ctype: cat.ctype
+            }));
+
+          return {
+            post: {
+              post_id: post.post_id,
+              post_topic: post.post_topic,
+              post_description: post.post_description,
+              amount_of_like: post.amount_of_like,
+              amount_of_save: post.amount_of_save,
+              amount_of_comment: post.amount_of_comment,
+              post_date: post.post_date,
+              post_fk_cid: post.post_fk_cid,
+              post_fk_uid: post.post_fk_uid,
+            },
+            images,
+            categories
+          };
+        });
+
+        res.status(200).json(postsWithData);
+      });
+    });
+  });
+});
+
+
 
 
 
