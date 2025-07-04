@@ -136,18 +136,15 @@ router.post("/like/:post_id", (req, res) => {
 
 // API เพิ่มโพสต์พร้อมรูปภาพ
 router.post('/post/add', (req, res) => {
-  let { post_topic, post_description, post_fk_uid, images } = req.body;
+  let { post_topic, post_description, post_fk_uid, images, category_id_fk } = req.body;
 
-  // ✅ แปลงค่าว่างเป็น null (กรณีส่งมาว่างเปล่า)
   post_topic = post_topic?.trim() === '' ? null : post_topic;
   post_description = post_description?.trim() === '' ? null : post_description;
 
-  // ✅ ตรวจสอบแค่ uid และ images เป็น array
   if (!post_fk_uid || !Array.isArray(images)) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
-  // ✅ Insert ลงตาราง post โดย post_topic, post_description เป็น null ได้
   const insertPostSql = `
     INSERT INTO post (post_topic, post_description, post_date, post_fk_uid)
     VALUES (?, ?, NOW(), ?)
@@ -161,28 +158,43 @@ router.post('/post/add', (req, res) => {
 
     const insertedPostId = postResult.insertId;
 
-    if (images.length === 0) {
-      return res.status(201).json({ message: 'Post inserted without images' });
-    }
-
-    const insertImageSql = `
-      INSERT INTO image_post (image, image_fk_postid)
-      VALUES ?
-    `;
-    const imageValues = images.map((url) => [url, insertedPostId]);
-
-    conn.query(insertImageSql, [imageValues], (err, imageResult) => {
-      if (err) {
-        console.error(err);
-        return res.status(500).json({ error: 'Failed to insert images' });
-      }
-
-      res.status(201).json({
-        message: 'Post and images inserted successfully',
-        post_id: insertedPostId,
-        images_count: imageValues.length,
+    const insertImages = () => {
+      if (!images.length) return Promise.resolve();
+      const insertImageSql = `INSERT INTO image_post (image, image_fk_postid) VALUES ?`;
+      const imageValues = images.map((url) => [url, insertedPostId]);
+      return new Promise((resolve, reject) => {
+        conn.query(insertImageSql, [imageValues], (err) => {
+          if (err) return reject(err);
+          resolve();
+        });
       });
-    });
+    };
+
+    const insertCategories = () => {
+      if (!Array.isArray(category_id_fk) || category_id_fk.length === 0) return Promise.resolve();
+      const insertCategorySql = `INSERT INTO post_category (category_id_fk, post_id_fk) VALUES ?`;
+      const categoryValues = category_id_fk.map((catId) => [catId, insertedPostId]);
+      return new Promise((resolve, reject) => {
+        conn.query(insertCategorySql, [categoryValues], (err) => {
+          if (err) return reject(err);
+          resolve();
+        });
+      });
+    };
+
+    Promise.all([insertImages(), insertCategories()])
+      .then(() => {
+        res.status(201).json({
+          message: 'Post, images, and categories inserted successfully',
+          post_id: insertedPostId,
+          images_count: images.length,
+          categories_count: Array.isArray(category_id_fk) ? category_id_fk.length : 0
+        });
+      })
+      .catch((err) => {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to insert images or categories' });
+      });
   });
 });
 
