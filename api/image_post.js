@@ -160,7 +160,7 @@ router.post("/like/:post_id", (req, res) => {
 
 // API เพิ่มโพสต์พร้อมรูปภาพ
 router.post('/post/add', (req, res) => {
-  let { post_topic, post_description, post_fk_uid, images, category_id_fk } = req.body;
+  let { post_topic, post_description, post_fk_uid, images, category_id_fk, hashtags } = req.body;
 
   post_topic = post_topic?.trim() === '' ? null : post_topic;
   post_description = post_description?.trim() === '' ? null : post_description;
@@ -206,21 +206,38 @@ router.post('/post/add', (req, res) => {
       });
     };
 
-    Promise.all([insertImages(), insertCategories()])
+    // ฟังก์ชันนี้รับ hashtags เป็น array ของ tag_id (number)
+    const insertPostHashtags = () => {
+      if (!Array.isArray(hashtags) || hashtags.length === 0) return Promise.resolve();
+
+      const insertPostHashtagSql = `INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?`;
+      const values = hashtags.map(tagId => [insertedPostId, tagId]);
+
+      return new Promise((resolve, reject) => {
+        conn.query(insertPostHashtagSql, [values], (err) => {
+          if (err) return reject(err);
+          resolve();
+        });
+      });
+    };
+
+    Promise.all([insertImages(), insertCategories(), insertPostHashtags()])
       .then(() => {
         res.status(201).json({
-          message: 'Post, images, and categories inserted successfully',
+          message: 'Post, images, categories, and hashtags inserted successfully',
           post_id: insertedPostId,
           images_count: images.length,
-          categories_count: Array.isArray(category_id_fk) ? category_id_fk.length : 0
+          categories_count: Array.isArray(category_id_fk) ? category_id_fk.length : 0,
+          hashtags_count: Array.isArray(hashtags) ? hashtags.length : 0,
         });
       })
       .catch((err) => {
         console.error(err);
-        res.status(500).json({ error: 'Failed to insert images or categories' });
+        res.status(500).json({ error: 'Failed to insert images, categories, or hashtags' });
       });
   });
 });
+
 
 // ดึงโพสต์ทั้งหมดของ user ตาม uid
 router.get("/by-user/:uid", (req, res) => {
