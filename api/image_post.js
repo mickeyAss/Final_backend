@@ -15,7 +15,9 @@ router.get("/get", (req, res) => {
                 user.hip, user.personal_description, user.profile_image
             FROM post
             JOIN user ON post.post_fk_uid = user.uid
-            ORDER BY post.post_date DESC
+            ORDER BY 
+                DATE(post.post_date) DESC,
+                TIME(post.post_date) DESC
         `;
 
         conn.query(postSql, (err, postResults) => {
@@ -98,7 +100,7 @@ router.get("/get", (req, res) => {
                                 user: {
                                     uid: post.uid,
                                     name: post.name,
-                                    email: post.email,
+                                    email: post.email, 
                                     height: post.height,
                                     weight: post.weight,
                                     shirt_size: post.shirt_size,
@@ -112,6 +114,12 @@ router.get("/get", (req, res) => {
                                 categories,
                                 hashtags
                             };
+                        });
+
+                        // เพิ่มการ log เพื่อดูการเรียงลำดับ
+                        console.log('Posts ordered by date and time:');
+                        postsWithData.forEach((post, index) => {
+                            console.log(`${index + 1}. Post ID: ${post.post.post_id}, Date: ${post.post.post_date}`);
                         });
 
                         res.status(200).json(postsWithData);
