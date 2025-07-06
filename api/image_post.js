@@ -120,33 +120,42 @@ router.get("/get", (req, res) => {
 });
 
 
-
-
-
 router.post('/like', (req, res) => {
   const { user_id, post_id } = req.body;
 
   if (!user_id || !post_id) {
+    console.log('[Like] Missing user_id or post_id');
     return res.status(400).json({ error: 'user_id and post_id are required' });
   }
 
   const checkSql = 'SELECT * FROM post_likes WHERE user_id_fk = ? AND post_id_fk = ?';
   conn.query(checkSql, [user_id, post_id], (err, results) => {
-    if (err) return res.status(500).json({ error: 'Check failed' });
+    if (err) {
+      console.log('[Like] Check failed:', err);
+      return res.status(500).json({ error: 'Check failed' });
+    }
 
     if (results.length > 0) {
+      console.log(`[Like] User ${user_id} already liked post ${post_id}`);
       return res.status(400).json({ error: 'Already liked' });
     }
 
     // บันทึกการไลก์
     const insertSql = 'INSERT INTO post_likes (user_id_fk, post_id_fk) VALUES (?, ?)';
     conn.query(insertSql, [user_id, post_id], (err2) => {
-      if (err2) return res.status(500).json({ error: 'Like insert failed' });
+      if (err2) {
+        console.log('[Like] Like insert failed:', err2);
+        return res.status(500).json({ error: 'Like insert failed' });
+      }
 
       // เพิ่มจำนวนไลก์ใน post table
       const updatePostSql = 'UPDATE post SET amount_of_like = amount_of_like + 1 WHERE post_id = ?';
       conn.query(updatePostSql, [post_id], (err3) => {
-        if (err3) return res.status(500).json({ error: 'Post update failed' });
+        if (err3) {
+          console.log('[Like] Post update failed:', err3);
+          return res.status(500).json({ error: 'Post update failed' });
+        }
+        console.log(`[Like] User ${user_id} liked post ${post_id} successfully`);
         res.status(200).json({ message: 'Liked' });
       });
     });
@@ -158,24 +167,34 @@ router.post('/unlike', (req, res) => {
   const { user_id, post_id } = req.body;
 
   if (!user_id || !post_id) {
+    console.log('[Unlike] Missing user_id or post_id');
     return res.status(400).json({ error: 'user_id and post_id are required' });
   }
 
   const deleteSql = 'DELETE FROM post_likes WHERE user_id_fk = ? AND post_id_fk = ?';
   conn.query(deleteSql, [user_id, post_id], (err, result) => {
-    if (err) return res.status(500).json({ error: 'Unlike failed' });
+    if (err) {
+      console.log('[Unlike] Unlike failed:', err);
+      return res.status(500).json({ error: 'Unlike failed' });
+    }
 
     if (result.affectedRows === 0) {
+      console.log(`[Unlike] Like not found for user ${user_id} and post ${post_id}`);
       return res.status(404).json({ error: 'Like not found' });
     }
 
     const updatePostSql = 'UPDATE post SET amount_of_like = GREATEST(amount_of_like - 1, 0) WHERE post_id = ?';
     conn.query(updatePostSql, [post_id], (err2) => {
-      if (err2) return res.status(500).json({ error: 'Post update failed' });
+      if (err2) {
+        console.log('[Unlike] Post update failed:', err2);
+        return res.status(500).json({ error: 'Post update failed' });
+      }
+      console.log(`[Unlike] User ${user_id} unliked post ${post_id} successfully`);
       res.status(200).json({ message: 'Unliked' });
     });
   });
 });
+
 
 router.get('/liked-posts/:user_id', (req, res) => {
   const { user_id } = req.params;
