@@ -134,36 +134,73 @@ router.get("/get", (req, res) => {
 });
 
 
-// เส้น API สำหรับอัปเดตจำนวนไลค์ของโพสต์
-router.post("/like/:post_id", (req, res) => {
-    const post_id = req.params.post_id;
-    const { action } = req.body;
 
-    if (!post_id || !['like', 'unlike'].includes(action)) {
-        return res.status(400).json({ error: 'post_id and valid action are required' });
+router.post('/like', (req, res) => {
+  const { user_id, post_id } = req.body;
+
+  if (!user_id || !post_id) {
+    return res.status(400).json({ error: 'user_id and post_id are required' });
+  }
+
+  const checkSql = 'SELECT * FROM post_likes WHERE user_id_fk = ? AND post_id_fk = ?';
+  conn.query(checkSql, [user_id, post_id], (err, results) => {
+    if (err) return res.status(500).json({ error: 'Check failed' });
+
+    if (results.length > 0) {
+      return res.status(400).json({ error: 'Already liked' });
     }
 
-    const updateSql = `
-        UPDATE post 
-        SET amount_of_like = GREATEST(amount_of_like ${action === 'like' ? '+ 1' : '- 1'}, 0) 
-        WHERE post_id = ?
-    `;
+    // บันทึกการไลก์
+    const insertSql = 'INSERT INTO post_likes (user_id_fk, post_id_fk) VALUES (?, ?)';
+    conn.query(insertSql, [user_id, post_id], (err2) => {
+      if (err2) return res.status(500).json({ error: 'Like insert failed' });
 
-    conn.query(updateSql, [post_id], (err, result) => {
-        if (err) {
-            console.log(err);
-            return res.status(500).json({ error: 'Failed to update like count' });
-        }
-
-        if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Post not found' });
-        }
-
-        res.status(200).json({ 
-            message: action === 'like' ? 'Liked' : 'Unliked'
-        });
+      // เพิ่มจำนวนไลก์ใน post table
+      const updatePostSql = 'UPDATE post SET amount_of_like = amount_of_like + 1 WHERE post_id = ?';
+      conn.query(updatePostSql, [post_id], (err3) => {
+        if (err3) return res.status(500).json({ error: 'Post update failed' });
+        res.status(200).json({ message: 'Liked' });
+      });
     });
+  });
 });
+
+
+router.post('/unlike', (req, res) => {
+  const { user_id, post_id } = req.body;
+
+  if (!user_id || !post_id) {
+    return res.status(400).json({ error: 'user_id and post_id are required' });
+  }
+
+  const deleteSql = 'DELETE FROM post_likes WHERE user_id_fk = ? AND post_id_fk = ?';
+  conn.query(deleteSql, [user_id, post_id], (err, result) => {
+    if (err) return res.status(500).json({ error: 'Unlike failed' });
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Like not found' });
+    }
+
+    const updatePostSql = 'UPDATE post SET amount_of_like = GREATEST(amount_of_like - 1, 0) WHERE post_id = ?';
+    conn.query(updatePostSql, [post_id], (err2) => {
+      if (err2) return res.status(500).json({ error: 'Post update failed' });
+      res.status(200).json({ message: 'Unliked' });
+    });
+  });
+});
+
+router.get('/liked-posts/:user_id', (req, res) => {
+  const { user_id } = req.params;
+  const sql = 'SELECT post_id_fk FROM post_likes WHERE user_id_fk = ?';
+
+  conn.query(sql, [user_id], (err, results) => {
+    if (err) return res.status(500).json({ error: 'Query failed' });
+    const likedPostIds = results.map(row => row.post_id_fk);
+    res.status(200).json({ likedPostIds });
+  });
+});
+
+
 
 
 // API เพิ่มโพสต์พร้อมรูปภาพ
