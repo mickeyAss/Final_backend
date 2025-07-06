@@ -32,7 +32,7 @@ router.get('/search', (req, res) => {
     const q = req.query.q?.trim();
 
     if (!q || q === '#') {
-      const sqlAll = 'SELECT * FROM hashtags';
+      const sqlAll = 'SELECT * FROM hashtags LIMIT 20'; // จำกัดจำนวนผลลัพธ์
       conn.query(sqlAll, (err, results) => {
         if (err) {
           console.error('Hashtag query error:', err);
@@ -41,8 +41,9 @@ router.get('/search', (req, res) => {
         return res.status(200).json({ isNew: false, data: results });
       });
     } else {
-      const sqlSearch = 'SELECT * FROM hashtags WHERE tag_name = ?';
-      conn.query(sqlSearch, [q], (err, results) => {
+      const sqlSearch = 'SELECT * FROM hashtags WHERE tag_name LIKE ? LIMIT 20';
+      const searchTerm = `%${q}%`;
+      conn.query(sqlSearch, [searchTerm], (err, results) => {
         if (err) {
           console.error('Hashtag search error:', err);
           return res.status(400).json({ error: 'Hashtag search error' });
@@ -59,6 +60,7 @@ router.get('/search', (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+
 
 router.post('/insert', (req, res) => {
   try {
