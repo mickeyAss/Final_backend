@@ -27,7 +27,7 @@ router.get("/get", (req, res) => {
 });
 
 // ค้นหา hashtag ด้วย query string q (ถ้าไม่ใส่คืนทั้งหมด)
-router.get('/search-or-insert', (req, res) => {
+router.get('/search', (req, res) => {
   try {
     const q = req.query.q?.trim();
 
@@ -48,28 +48,10 @@ router.get('/search-or-insert', (req, res) => {
           return res.status(400).json({ error: 'Hashtag search error' });
         }
 
-        if (results.length > 0) {
-          // คำมีอยู่แล้ว
-          return res.status(200).json({ isNew: false, data: results });
-        } else {
-          // คำใหม่ ให้เพิ่มและแจ้งว่าเป็นคำใหม่
-          const sqlInsert = 'INSERT INTO hashtags (tag_name) VALUES (?)';
-          conn.query(sqlInsert, [q], (err, insertResult) => {
-            if (err) {
-              console.error('Hashtag insert error:', err);
-              return res.status(400).json({ error: 'Hashtag insert error' });
-            }
-            const newId = insertResult.insertId;
-            const sqlNew = 'SELECT * FROM hashtags WHERE tag_id = ?';
-            conn.query(sqlNew, [newId], (err, newResults) => {
-              if (err) {
-                console.error('Hashtag query new error:', err);
-                return res.status(400).json({ error: 'Hashtag query new error' });
-              }
-              return res.status(200).json({ isNew: true, data: newResults, message: 'เพิ่มคำใหม่เรียบร้อย' });
-            });
-          });
-        }
+        return res.status(200).json({
+          isNew: results.length === 0,
+          data: results,
+        });
       });
     }
   } catch (err) {
@@ -77,5 +59,62 @@ router.get('/search-or-insert', (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+
+router.post('/insert', (req, res) => {
+  try {
+    const { tag_name } = req.body;
+    const q = tag_name?.trim();
+
+    if (!q || q === '#') {
+      return res.status(400).json({ error: 'คำไม่ถูกต้อง' });
+    }
+
+    const sqlSearch = 'SELECT * FROM hashtags WHERE tag_name = ?';
+    conn.query(sqlSearch, [q], (err, results) => {
+      if (err) {
+        console.error('Hashtag search error:', err);
+        return res.status(400).json({ error: 'Hashtag search error' });
+      }
+
+      if (results.length > 0) {
+        return res.status(200).json({
+          isNew: false,
+          data: results,
+          message: 'มีคำนี้อยู่แล้ว',
+        });
+      } else {
+        const sqlInsert = 'INSERT INTO hashtags (tag_name) VALUES (?)';
+        conn.query(sqlInsert, [q], (err, insertResult) => {
+          if (err) {
+            console.error('Hashtag insert error:', err);
+            return res.status(400).json({ error: 'Hashtag insert error' });
+          }
+
+          const newId = insertResult.insertId;
+          const sqlNew = 'SELECT * FROM hashtags WHERE tag_id = ?';
+          conn.query(sqlNew, [newId], (err, newResults) => {
+            if (err) {
+              console.error('Hashtag query new error:', err);
+              return res
+                .status(400)
+                .json({ error: 'Hashtag query new error' });
+            }
+
+            return res.status(200).json({
+              isNew: true,
+              data: newResults,
+              message: 'เพิ่มคำใหม่เรียบร้อย',
+            });
+          });
+        });
+      }
+    });
+  } catch (err) {
+    console.error('Server error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
 
 
