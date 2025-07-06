@@ -6,8 +6,8 @@ module.exports = router;
 
 //เส้น Api ดึงข้อมูลทั้งหมดจากเทเบิ้ล post และเทเบิ้ล image และ user
 router.get("/get", (req, res) => {
-    try {
-        const postSql = `
+  try {
+    const postSql = `
             SELECT 
                 post.*, 
                 user.uid, user.name, user.email, user.height, user.weight, 
@@ -20,132 +20,132 @@ router.get("/get", (req, res) => {
                 TIME(post.post_date) DESC
         `;
 
-        conn.query(postSql, (err, postResults) => {
-            if (err) {
-                console.log(err);
-                return res.status(400).json({ error: 'Post query error' });
-            }
+    conn.query(postSql, (err, postResults) => {
+      if (err) {
+        console.log(err);
+        return res.status(400).json({ error: 'Post query error' });
+      }
 
-            if (postResults.length === 0) {
-                return res.status(404).json({ error: 'No posts found' });
-            }
+      if (postResults.length === 0) {
+        return res.status(404).json({ error: 'No posts found' });
+      }
 
-            // ดึงรูปภาพทั้งหมด
-            const imageSql = `SELECT * FROM image_post`;
-            conn.query(imageSql, (err, imageResults) => {
-                if (err) {
-                    console.log(err);
-                    return res.status(400).json({ error: 'Image query error' });
-                }
+      // ดึงรูปภาพทั้งหมด
+      const imageSql = `SELECT * FROM image_post`;
+      conn.query(imageSql, (err, imageResults) => {
+        if (err) {
+          console.log(err);
+          return res.status(400).json({ error: 'Image query error' });
+        }
 
-                // ดึงข้อมูล category ทั้งหมด
-                const categorySql = `
+        // ดึงข้อมูล category ทั้งหมด
+        const categorySql = `
                     SELECT 
                         pc.post_id_fk, 
                         c.cid, c.cname, c.cimage, c.ctype
                     FROM post_category pc
                     JOIN category c ON pc.category_id_fk = c.cid
                 `;
-                conn.query(categorySql, (err, categoryResults) => {
-                    if (err) {
-                        console.log(err);
-                        return res.status(400).json({ error: 'Category query error' });
-                    }
+        conn.query(categorySql, (err, categoryResults) => {
+          if (err) {
+            console.log(err);
+            return res.status(400).json({ error: 'Category query error' });
+          }
 
-                    // ดึงข้อมูล post_hashtags กับ hashtags
-                    const hashtagSql = `
+          // ดึงข้อมูล post_hashtags กับ hashtags
+          const hashtagSql = `
                         SELECT 
                             ph.post_id_fk, 
                             h.tag_id, h.tag_name 
                         FROM post_hashtags ph
                         JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
                     `;
-                    conn.query(hashtagSql, (err, hashtagResults) => {
-                        if (err) {
-                            console.log(err);
-                            return res.status(400).json({ error: 'Hashtag query error' });
-                        }
+          conn.query(hashtagSql, (err, hashtagResults) => {
+            if (err) {
+              console.log(err);
+              return res.status(400).json({ error: 'Hashtag query error' });
+            }
 
-                        // รวมข้อมูลโพสต์พร้อมรูป, category, hashtag
-                        const postsWithData = postResults.map(post => {
-                            const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
-                            const categories = categoryResults
-                                .filter(cat => cat.post_id_fk === post.post_id)
-                                .map(cat => ({
-                                    cid: cat.cid,
-                                    cname: cat.cname,
-                                    cimage: cat.cimage,
-                                    ctype: cat.ctype
-                                }));
+            // รวมข้อมูลโพสต์พร้อมรูป, category, hashtag
+            const postsWithData = postResults.map(post => {
+              const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
+              const categories = categoryResults
+                .filter(cat => cat.post_id_fk === post.post_id)
+                .map(cat => ({
+                  cid: cat.cid,
+                  cname: cat.cname,
+                  cimage: cat.cimage,
+                  ctype: cat.ctype
+                }));
 
-                            const hashtags = hashtagResults
-                                .filter(ht => ht.post_id_fk === post.post_id)
-                                .map(ht => ({
-                                    tag_id: ht.tag_id,
-                                    tag_name: ht.tag_name
-                                }));
+              const hashtags = hashtagResults
+                .filter(ht => ht.post_id_fk === post.post_id)
+                .map(ht => ({
+                  tag_id: ht.tag_id,
+                  tag_name: ht.tag_name
+                }));
 
-                            return {
-                                post: {
-                                    post_id: post.post_id,
-                                    post_topic: post.post_topic,
-                                    post_description: post.post_description,
-                                    amount_of_like: post.amount_of_like,
-                                    amount_of_save: post.amount_of_save,
-                                    amount_of_comment: post.amount_of_comment,
-                                    post_date: post.post_date,
-                                    post_fk_cid: post.post_fk_cid,
-                                    post_fk_uid: post.post_fk_uid,
-                                },
-                                user: {
-                                    uid: post.uid,
-                                    name: post.name,
-                                    email: post.email, 
-                                    height: post.height,
-                                    weight: post.weight,
-                                    shirt_size: post.shirt_size,
-                                    chest: post.chest,
-                                    waist_circumference: post.waist_circumference,
-                                    hip: post.hip,
-                                    personal_description: post.personal_description,
-                                    profile_image: post.profile_image
-                                },
-                                images,
-                                categories,
-                                hashtags
-                            };
-                        });
-
-                        // เพิ่มการ log เพื่อดูการเรียงลำดับ
-                        console.log('Posts ordered by date and time:');
-                        postsWithData.forEach((post, index) => {
-                            console.log(`${index + 1}. Post ID: ${post.post.post_id}, Date: ${post.post.post_date}`);
-                        });
-
-                        res.status(200).json(postsWithData);
-                    });
-                });
+              return {
+                post: {
+                  post_id: post.post_id,
+                  post_topic: post.post_topic,
+                  post_description: post.post_description,
+                  amount_of_like: post.amount_of_like,
+                  amount_of_save: post.amount_of_save,
+                  amount_of_comment: post.amount_of_comment,
+                  post_date: post.post_date,
+                  post_fk_cid: post.post_fk_cid,
+                  post_fk_uid: post.post_fk_uid,
+                },
+                user: {
+                  uid: post.uid,
+                  name: post.name,
+                  email: post.email,
+                  height: post.height,
+                  weight: post.weight,
+                  shirt_size: post.shirt_size,
+                  chest: post.chest,
+                  waist_circumference: post.waist_circumference,
+                  hip: post.hip,
+                  personal_description: post.personal_description,
+                  profile_image: post.profile_image
+                },
+                images,
+                categories,
+                hashtags
+              };
             });
+
+            // เพิ่มการ log เพื่อดูการเรียงลำดับ
+            console.log('Posts ordered by date and time:');
+            postsWithData.forEach((post, index) => {
+              console.log(`${index + 1}. Post ID: ${post.post.post_id}, Date: ${post.post.post_date}`);
+            });
+
+            res.status(200).json(postsWithData);
+          });
         });
-    } catch (err) {
-        console.log(err);
-        return res.status(500).json({ error: 'Server error' });
-    }
+      });
+    });
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({ error: 'Server error' });
+  }
 });
 
 
 // เส้น API สำหรับอัปเดตจำนวนไลค์ของโพสต์
 router.post("/like/:post_id", (req, res) => {
     const post_id = req.params.post_id;
-    const { isLiked } = req.body; // รับสถานะจาก client ว่าปัจจุบันถูกไลก์อยู่ไหม
+    const { action } = req.body;
 
-    if (!post_id || typeof isLiked !== 'boolean') {
-        return res.status(400).json({ error: 'post_id and isLiked(boolean) are required' });
+    if (!post_id || !['like', 'unlike'].includes(action)) {
+        return res.status(400).json({ error: 'post_id and valid action are required' });
     }
 
     const updateSql = `
         UPDATE post 
-        SET amount_of_like = amount_of_like ${isLiked ? '- 1' : '+ 1'} 
+        SET amount_of_like = GREATEST(amount_of_like ${action === 'like' ? '+ 1' : '- 1'}, 0) 
         WHERE post_id = ?
     `;
 
@@ -160,11 +160,11 @@ router.post("/like/:post_id", (req, res) => {
         }
 
         res.status(200).json({ 
-            message: isLiked ? 'Unliked' : 'Liked', 
-            liked: !isLiked 
+            message: action === 'like' ? 'Liked' : 'Unliked'
         });
     });
 });
+
 
 // API เพิ่มโพสต์พร้อมรูปภาพ
 router.post('/post/add', (req, res) => {
