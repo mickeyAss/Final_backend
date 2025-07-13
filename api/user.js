@@ -26,8 +26,6 @@ router.get("/get", (req, res) => {
 //เส้น Api เข้าสู่ระบบ user
 const bcrypt = require('bcrypt'); // ต้องติดตั้งก่อน: npm install bcrypt
 
-const bcrypt = require('bcrypt');
-
 router.post("/login", async (req, res) => {
   const { email, password, isGoogleLogin, name, profile_image } = req.body;
 
