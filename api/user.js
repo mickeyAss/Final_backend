@@ -34,16 +34,15 @@ router.post("/login", async (req, res) => {
   }
 
   try {
-    const [result] = await new Promise((resolve, reject) => {
+    const results = await new Promise((resolve, reject) => {
       conn.query("SELECT * FROM user WHERE email = ?", [email], (err, results) => {
         if (err) reject(err);
         else resolve(results);
       });
     });
 
-    if (!result || result.length === 0) {
+    if (!results || results.length === 0) {
       if (isGoogleLogin) {
-        // Insert new user for Google login
         const insertResult = await new Promise((resolve, reject) => {
           const sqlInsert = "INSERT INTO user (name, email, password, profile_image) VALUES (?, ?, '', ?)";
           conn.query(sqlInsert, [name || '', email, profile_image || ''], (err, result) => {
@@ -52,23 +51,26 @@ router.post("/login", async (req, res) => {
           });
         });
 
+        const newUserResults = await new Promise((resolve, reject) => {
+          conn.query("SELECT * FROM user WHERE id = ?", [insertResult.insertId], (err, results) => {
+            if (err) reject(err);
+            else resolve(results);
+          });
+        });
+
+        const newUser = newUserResults[0];
+
         return res.status(200).json({
           message: 'Login successful (new user)',
-          user: {
-            uid: insertResult.insertId,
-            name: name || '',
-            email,
-            profile_image: profile_image || '',
-          }
+          user: newUser,
         });
       } else {
         return res.status(404).json({ error: 'User not found' });
       }
     } else {
-      const user = result[0];
+      const user = results[0];
 
       if (isGoogleLogin) {
-        // Google login success (skip password check)
         return res.status(200).json({ message: 'Login successful (Google)', user });
       }
 
@@ -88,6 +90,7 @@ router.post("/login", async (req, res) => {
     return res.status(500).json({ error: 'Server error' });
   }
 });
+
 
 
 
