@@ -34,7 +34,6 @@ router.post("/login", async (req, res) => {
   }
 
   try {
-    // ตรวจสอบว่าผู้ใช้มีในฐานข้อมูลหรือยัง
     const results = await new Promise((resolve, reject) => {
       conn.query("SELECT * FROM user WHERE email = ?", [email], (err, results) => {
         if (err) reject(err);
@@ -43,33 +42,19 @@ router.post("/login", async (req, res) => {
     });
 
     if (!results || results.length === 0) {
-      // ถ้าไม่เจอผู้ใช้ และเป็นล็อกอิน Google ให้สร้าง user ใหม่
       if (isGoogleLogin) {
         const insertResult = await new Promise((resolve, reject) => {
-          const sqlInsert = `
-            INSERT INTO user 
-            (name, email, password, profile_image, height, weight, shirt_size, chest, waist_circumference, hip, personal_description)
-            VALUES (?, ?, '', ?, '0', '0', NULL, '0', '0', '0', NULL)
-          `;
-          conn.query(sqlInsert, [name || '', email, profile_image || null], (err, result) => {
-            if (err) {
-              console.error("Insert Error:", err);
-              reject(err);
-            } else {
-              resolve(result);
-            }
+          const sqlInsert = "INSERT INTO user (name, email, password, profile_image) VALUES (?, ?, '', ?)";
+          conn.query(sqlInsert, [name || '', email, profile_image || ''], (err, result) => {
+            if (err) reject(err);
+            else resolve(result);
           });
         });
 
-        // ดึงข้อมูล user ที่เพิ่งสร้างมา
         const newUserResults = await new Promise((resolve, reject) => {
-          conn.query("SELECT * FROM user WHERE uid = ?", [insertResult.insertId], (err, results) => {
-            if (err) {
-              console.error("Select New User Error:", err);
-              reject(err);
-            } else {
-              resolve(results);
-            }
+          conn.query("SELECT * FROM user WHERE id = ?", [insertResult.insertId], (err, results) => {
+            if (err) reject(err);
+            else resolve(results);
           });
         });
 
@@ -80,19 +65,15 @@ router.post("/login", async (req, res) => {
           user: newUser,
         });
       } else {
-        // ไม่ใช่ google login และไม่เจอ user
         return res.status(404).json({ error: 'User not found' });
       }
     } else {
-      // เจอผู้ใช้แล้ว
       const user = results[0];
 
       if (isGoogleLogin) {
-        // ถ้าเป็น google login ก็อนุญาตเลย (สมมติไม่ตรวจ password)
         return res.status(200).json({ message: 'Login successful (Google)', user });
       }
 
-      // ตรวจสอบ password แบบปกติ
       if (!password) {
         return res.status(400).json({ error: 'Password is required' });
       }
@@ -105,11 +86,10 @@ router.post("/login", async (req, res) => {
       return res.status(200).json({ message: 'Login successful', user });
     }
   } catch (err) {
-    console.error("Server error:", err);
+    console.error(err);
     return res.status(500).json({ error: 'Server error' });
   }
 });
-
 
 
 
