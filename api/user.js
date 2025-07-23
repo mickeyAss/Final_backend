@@ -253,3 +253,115 @@ router.get("/get/:uid", (req, res) => {
     return res.status(500).json({ error: 'Server error' });
   }
 });
+
+// POST /follow
+router.post("/follow", (req, res) => {
+  const { follower_id, following_id } = req.body;
+
+  // ป้องกันไม่ให้ติดตามตัวเอง
+  if (!follower_id || !following_id || follower_id == following_id) {
+    return res.status(400).json({ error: "ข้อมูลไม่ถูกต้อง" });
+  }
+
+  const sql = `
+    INSERT IGNORE INTO user_followers (follower_id, following_id)
+    VALUES (?, ?)
+  `;
+
+  conn.query(sql, [follower_id, following_id], (err, result) => {
+    if (err) {
+      console.error(err);
+      return res.status(500).json({ error: "เกิดข้อผิดพลาดระหว่างการติดตาม" });
+    }
+
+    if (result.affectedRows === 0) {
+      return res.status(200).json({ message: "ติดตามซ้ำหรือข้อมูลมีอยู่แล้ว" });
+    }
+
+    return res.status(200).json({ message: "ติดตามสำเร็จ" });
+  });
+});
+
+
+// DELETE /unfollow
+router.delete("/unfollow", (req, res) => {
+  const { follower_id, following_id } = req.body;
+
+  if (!follower_id || !following_id || follower_id == following_id) {
+    return res.status(400).json({ error: "ข้อมูลไม่ถูกต้อง" });
+  }
+
+  const sql = `
+    DELETE FROM user_followers WHERE follower_id = ? AND following_id = ?
+  `;
+
+  conn.query(sql, [follower_id, following_id], (err, result) => {
+    if (err) {
+      console.error(err);
+      return res.status(500).json({ error: "เกิดข้อผิดพลาดในการเลิกติดตาม" });
+    }
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "ไม่พบข้อมูลการติดตาม" });
+    }
+
+    return res.status(200).json({ message: "เลิกติดตามสำเร็จ" });
+  });
+});
+
+
+// GET /is-following?follower_id=1&following_id=2
+router.get("/is-following", (req, res) => {
+  const { follower_id, following_id } = req.query;
+
+  if (!follower_id || !following_id) {
+    return res.status(400).json({ error: "Missing parameters" });
+  }
+
+  const sql = `
+    SELECT * FROM user_followers
+    WHERE follower_id = ? AND following_id = ?
+  `;
+
+  conn.query(sql, [follower_id, following_id], (err, result) => {
+    if (err) {
+      console.error(err);
+      return res.status(500).json({ error: "Server error" });
+    }
+
+    const isFollowing = result.length > 0;
+    return res.status(200).json({ isFollowing });
+  });
+});
+
+
+// GET /followers-count/:uid
+router.get("/followers-count/:uid", (req, res) => {
+  const uid = req.params.uid;
+
+  const sql = `
+    SELECT COUNT(*) AS followers FROM user_followers
+    WHERE following_id = ?
+  `;
+
+  conn.query(sql, [uid], (err, result) => {
+    if (err) return res.status(500).json({ error: "Error" });
+    res.status(200).json(result[0]);
+  });
+});
+
+// GET /following-count/:uid
+router.get("/following-count/:uid", (req, res) => {
+  const uid = req.params.uid;
+
+  const sql = `
+    SELECT COUNT(*) AS following FROM user_followers
+    WHERE follower_id = ?
+  `;
+
+  conn.query(sql, [uid], (err, result) => {
+    if (err) return res.status(500).json({ error: "Error" });
+    res.status(200).json(result[0]);
+  });
+});
+
