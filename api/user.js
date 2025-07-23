@@ -43,17 +43,26 @@ router.post("/login", async (req, res) => {
 
     if (!results || results.length === 0) {
       if (isGoogleLogin) {
-        // ❗️ยังไม่ insert เข้า database แค่ส่งข้อมูลกลับ
-        const tempUser = {
-          name: name || '',
-          email,
-          password: '',
-          profile_image: profile_image || '',
-        };
+        const insertResult = await new Promise((resolve, reject) => {
+          const sqlInsert = "INSERT INTO user (name, email, password, profile_image) VALUES (?, ?, '', ?)";
+          conn.query(sqlInsert, [name || '', email, profile_image || ''], (err, result) => {
+            if (err) reject(err);
+            else resolve(result);
+          });
+        });
+
+        const newUserResults = await new Promise((resolve, reject) => {
+          conn.query("SELECT * FROM user WHERE id = ?", [insertResult.insertId], (err, results) => {
+            if (err) reject(err);
+            else resolve(results);
+          });
+        });
+
+        const newUser = newUserResults[0];
 
         return res.status(200).json({
-          message: 'Google login - user not found in system. Please register.',
-          tempUser,
+          message: 'Login successful (new user)',
+          user: newUser,
         });
       } else {
         return res.status(404).json({ error: 'User not found' });
@@ -81,6 +90,8 @@ router.post("/login", async (req, res) => {
     return res.status(500).json({ error: 'Server error' });
   }
 });
+
+
 
 
 //เส้น Api สมัครสมาชิก user
