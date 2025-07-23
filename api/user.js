@@ -44,8 +44,18 @@ router.post("/login", async (req, res) => {
     if (!results || results.length === 0) {
       if (isGoogleLogin) {
         const insertResult = await new Promise((resolve, reject) => {
-          const sqlInsert = "INSERT INTO user (name, email, password, profile_image) VALUES (?, ?, '', ?)";
-          conn.query(sqlInsert, [name || '', email, profile_image || ''], (err, result) => {
+          const sqlInsert = `
+            INSERT INTO user (
+              name, email, password, profile_image,
+              height, weight, shirt_size, chest,
+              waist_circumference, hip, personal_description
+            ) VALUES (?, ?, '', ?, '0', '0', '', '0', '0', '0', '')
+          `;
+          conn.query(sqlInsert, [
+            name || '',
+            email,
+            profile_image || ''
+          ], (err, result) => {
             if (err) reject(err);
             else resolve(result);
           });
