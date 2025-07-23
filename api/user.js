@@ -24,16 +24,25 @@ router.get("/get", (req, res) => {
 });
 
 router.get("/users-except", (req, res) => {
-  const loggedInUid = req.query.uid; // รับ uid ผ่าน query param เช่น /users-except?uid=123
+  const loggedInUid = req.query.uid;
 
   if (!loggedInUid) {
     return res.status(400).json({ error: 'Missing uid parameter' });
   }
 
   try {
-    const sql = "SELECT * FROM user WHERE uid != ? ORDER BY RAND()";
+    const sql = `
+      SELECT * FROM user 
+      WHERE uid != ? 
+        AND uid NOT IN (
+          SELECT following_id 
+          FROM user_followers 
+          WHERE follower_id = ?
+        )
+      ORDER BY RAND()
+    `;
 
-    conn.query(sql, [loggedInUid], (err, result) => {
+    conn.query(sql, [loggedInUid, loggedInUid], (err, result) => {
       if (err) {
         console.log(err);
         return res.status(400).json({ error: 'Query error' });
@@ -41,13 +50,14 @@ router.get("/users-except", (req, res) => {
       if (result.length === 0) {
         return res.status(404).json({ error: 'No users found' });
       }
-      res.status(200).json(result); // ส่งข้อมูล user ทั้งหมด ยกเว้นคนที่ล็อกอิน
+      res.status(200).json(result);
     });
   } catch (err) {
     console.log(err);
     return res.status(500).json({ error: 'Server error' });
   }
 });
+
 
 
 //เส้น Api เข้าสู่ระบบ user
