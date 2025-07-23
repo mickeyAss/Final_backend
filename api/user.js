@@ -34,7 +34,7 @@ router.post("/login", async (req, res) => {
   }
 
   try {
-    // 🔍 ตรวจสอบว่า user มีอยู่หรือยัง
+    // ตรวจสอบ user ว่ามีอยู่หรือยัง
     const results = await new Promise((resolve, reject) => {
       conn.query("SELECT * FROM user WHERE email = ?", [email], (err, results) => {
         if (err) reject(err);
@@ -42,10 +42,10 @@ router.post("/login", async (req, res) => {
       });
     });
 
-    // 🆕 ถ้ายังไม่มี user
+    // ถ้ายังไม่มี user
     if (!results || results.length === 0) {
       if (isGoogleLogin) {
-        // ➕ สร้าง user ใหม่จาก Google login
+        // สร้าง user ใหม่จาก Google login
         const insertResult = await new Promise((resolve, reject) => {
           const sqlInsert = `
             INSERT INTO user (
@@ -66,9 +66,9 @@ router.post("/login", async (req, res) => {
           });
         });
 
-        // 📥 ดึงข้อมูล user ใหม่ที่เพิ่งสร้าง
+        // ดึงข้อมูล user ใหม่ โดยใช้ uid แทน id
         const newUserResults = await new Promise((resolve, reject) => {
-          conn.query("SELECT * FROM user WHERE id = ?", [insertResult.insertId], (err, results) => {
+          conn.query("SELECT * FROM user WHERE uid = ?", [insertResult.insertId], (err, results) => {
             if (err) reject(err);
             else resolve(results);
           });
@@ -84,7 +84,7 @@ router.post("/login", async (req, res) => {
         return res.status(404).json({ error: 'User not found' });
       }
     } else {
-      // 👤 ถ้ามี user อยู่แล้ว
+      // ถ้ามี user อยู่แล้ว
       const user = results[0];
 
       if (isGoogleLogin) {
@@ -94,7 +94,7 @@ router.post("/login", async (req, res) => {
         });
       }
 
-      // 🛡️ เช็ค password สำหรับ login ปกติ
+      // เช็ค password สำหรับ login ปกติ
       if (!password) {
         return res.status(400).json({ error: 'Password is required' });
       }
