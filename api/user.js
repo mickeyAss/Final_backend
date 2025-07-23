@@ -295,7 +295,7 @@ router.post("/follow", (req, res) => {
 
 // DELETE /unfollow
 router.delete("/unfollow", (req, res) => {
-  const { follower_id, following_id } = req.body;
+  const { follower_id, following_id } = req.query;
 
   if (!follower_id || !following_id || follower_id == following_id) {
     return res.status(400).json({ error: "ข้อมูลไม่ถูกต้อง" });
@@ -318,6 +318,7 @@ router.delete("/unfollow", (req, res) => {
     return res.status(200).json({ message: "เลิกติดตามสำเร็จ" });
   });
 });
+
 
 
 // GET /is-following?follower_id=1&following_id=2
