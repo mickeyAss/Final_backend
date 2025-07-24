@@ -503,6 +503,125 @@ router.get('/by-category/:cid', (req, res) => {
   });
 });
 
+router.get('/liked-posts/full/:user_id', (req, res) => {
+  const { user_id } = req.params;
+
+  const likedPostSql = `
+    SELECT 
+      p.*, 
+      u.uid, u.name, u.email, u.height, u.weight, 
+      u.shirt_size, u.chest, u.waist_circumference, 
+      u.hip, u.personal_description, u.profile_image
+    FROM post_likes pl
+    JOIN post p ON pl.post_id_fk = p.post_id
+    JOIN user u ON p.post_fk_uid = u.uid
+    WHERE pl.user_id_fk = ?
+    ORDER BY p.post_date DESC
+  `;
+
+  conn.query(likedPostSql, [user_id], (err, postResults) => {
+    if (err) return res.status(500).json({ error: 'Post query failed' });
+
+    if (postResults.length === 0) {
+      return res.status(404).json({ error: 'No liked posts found for this user' });
+    }
+
+    const postIds = postResults.map(post => post.post_id);
+
+    const imageSql = `SELECT * FROM image_post WHERE image_fk_postid IN (?)`;
+    conn.query(imageSql, [postIds], (err, imageResults) => {
+      if (err) return res.status(500).json({ error: 'Image query failed' });
+
+      const categorySql = `
+        SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
+        FROM post_category pc
+        JOIN category c ON pc.category_id_fk = c.cid
+        WHERE pc.post_id_fk IN (?)
+      `;
+      conn.query(categorySql, [postIds], (err, categoryResults) => {
+        if (err) return res.status(500).json({ error: 'Category query failed' });
+
+        const hashtagSql = `
+          SELECT ph.post_id_fk, h.tag_id, h.tag_name
+          FROM post_hashtags ph
+          JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
+          WHERE ph.post_id_fk IN (?)
+        `;
+        conn.query(hashtagSql, [postIds], (err, hashtagResults) => {
+          if (err) return res.status(500).json({ error: 'Hashtag query failed' });
+
+          const likeSql = `
+            SELECT post_id_fk AS post_id, COUNT(*) AS like_count
+            FROM post_likes
+            GROUP BY post_id_fk
+          `;
+          conn.query(likeSql, (err, likeResults) => {
+            if (err) return res.status(500).json({ error: 'Like count query failed' });
+
+            const likeMap = {};
+            likeResults.forEach(l => {
+              likeMap[l.post_id] = l.like_count;
+            });
+
+            const postsWithData = postResults.map(post => {
+              const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
+              const categories = categoryResults
+                .filter(cat => cat.post_id_fk === post.post_id)
+                .map(cat => ({
+                  cid: cat.cid,
+                  cname: cat.cname,
+                  cimage: cat.cimage,
+                  ctype: cat.ctype
+                }));
+              const hashtags = hashtagResults
+                .filter(ht => ht.post_id_fk === post.post_id)
+                .map(ht => ({
+                  tag_id: ht.tag_id,
+                  tag_name: ht.tag_name
+                }));
+
+              return {
+                post: {
+                  post_id: post.post_id,
+                  post_topic: post.post_topic,
+                  post_description: post.post_description,
+                  post_date: post.post_date,
+                  post_fk_cid: post.post_fk_cid,
+                  post_fk_uid: post.post_fk_uid,
+                  amount_of_like: likeMap[post.post_id] || 0,
+                  amount_of_save: post.amount_of_save,
+                  amount_of_comment: post.amount_of_comment
+                },
+                user: {
+                  uid: post.uid,
+                  name: post.name,
+                  email: post.email,
+                  height: post.height,
+                  weight: post.weight,
+                  shirt_size: post.shirt_size,
+                  chest: post.chest,
+                  waist_circumference: post.waist_circumference,
+                  hip: post.hip,
+                  personal_description: post.personal_description,
+                  profile_image: post.profile_image
+                },
+                images,
+                categories,
+                hashtags
+              };
+            });
+
+            res.status(200).json(postsWithData);
+          });
+        });
+      });
+    });
+  });
+});
+
+
+
+
 
 
 
