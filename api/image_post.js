@@ -507,17 +507,18 @@ router.get('/liked-posts/full/:user_id', (req, res) => {
   const { user_id } = req.params;
 
   const likedPostSql = `
-    SELECT 
-      p.*, 
-      u.uid, u.name, u.email, u.height, u.weight, 
-      u.shirt_size, u.chest, u.waist_circumference, 
-      u.hip, u.personal_description, u.profile_image
-    FROM post_likes pl
-    JOIN post p ON pl.post_id_fk = p.post_id
-    JOIN user u ON p.post_fk_uid = u.uid
-    WHERE pl.user_id_fk = ?
-    ORDER BY p.post_date DESC
-  `;
+  SELECT 
+    p.*, 
+    u.uid, u.name, u.email, u.height, u.weight, 
+    u.shirt_size, u.chest, u.waist_circumference, 
+    u.hip, u.personal_description, u.profile_image,
+    pl.created_at AS liked_at
+  FROM post_likes pl
+  JOIN post p ON pl.post_id_fk = p.post_id
+  JOIN user u ON p.post_fk_uid = u.uid
+  WHERE pl.user_id_fk = ?
+  ORDER BY pl.created_at DESC
+`;
 
   conn.query(likedPostSql, [user_id], (err, postResults) => {
     if (err) return res.status(500).json({ error: 'Post query failed' });
