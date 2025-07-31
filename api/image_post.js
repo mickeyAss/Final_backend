@@ -2,6 +2,7 @@ var express = require('express');
 var router = express.Router();
 var conn = require('../dbconnect')
 
+// โหลด Google Cloud Vision API client สำหรับวิเคราะห์ภาพ
 const vision = require('@google-cloud/vision');
 const client = new vision.ImageAnnotatorClient({
   keyFilename: 'final-project-465814-1278faeb06a3.json' // ไฟล์ service account ของ Google Cloud Vision
@@ -9,7 +10,10 @@ const client = new vision.ImageAnnotatorClient({
 
 module.exports = router;
 
-//เส้น Api ดึงข้อมูลทั้งหมดจากเทเบิ้ล post และเทเบิ้ล image และ user
+// --------------------------------------------
+// API GET /get
+// ดึงโพสต์ทั้งหมด พร้อมข้อมูลผู้ใช้ รูปภาพ หมวดหมู่ แฮชแท็ก และจำนวนไลก์
+// --------------------------------------------
 router.get("/get", (req, res) => {
   try {
     const postSql = `
@@ -29,10 +33,12 @@ router.get("/get", (req, res) => {
       if (postResults.length === 0)
         return res.status(404).json({ error: 'No posts found' });
 
+      // ดึงรูปภาพทั้งหมดจากตาราง image_post
       const imageSql = `SELECT * FROM image_post`;
       conn.query(imageSql, (err, imageResults) => {
         if (err) return res.status(400).json({ error: 'Image query error' });
 
+        // ดึงหมวดหมู่ของโพสต์จากตาราง post_category และ category
         const categorySql = `
           SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
           FROM post_category pc
@@ -41,6 +47,7 @@ router.get("/get", (req, res) => {
         conn.query(categorySql, (err, categoryResults) => {
           if (err) return res.status(400).json({ error: 'Category query error' });
 
+          // ดึงแฮชแท็กของโพสต์จาก post_hashtags และ hashtags
           const hashtagSql = `
             SELECT ph.post_id_fk, h.tag_id, h.tag_name 
             FROM post_hashtags ph
@@ -49,7 +56,7 @@ router.get("/get", (req, res) => {
           conn.query(hashtagSql, (err, hashtagResults) => {
             if (err) return res.status(400).json({ error: 'Hashtag query error' });
 
-            // ✅ ดึงจำนวนไลก์จาก post_likes
+            // ดึงจำนวนไลก์แต่ละโพสต์จากตาราง post_likes
             const likeSql = `
               SELECT post_id_fk AS post_id, COUNT(*) AS like_count 
               FROM post_likes 
@@ -58,11 +65,13 @@ router.get("/get", (req, res) => {
             conn.query(likeSql, (err, likeResults) => {
               if (err) return res.status(400).json({ error: 'Like count query error' });
 
+              // สร้างแผนที่จำนวนไลก์สำหรับแต่ละโพสต์
               const likeMap = {};
               likeResults.forEach(item => {
                 likeMap[item.post_id] = item.like_count;
               });
 
+              // รวมข้อมูลโพสต์, ผู้ใช้, รูปภาพ, หมวดหมู่, แฮชแท็ก, และจำนวนไลก์
               const postsWithData = postResults.map(post => {
                 const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
                 const categories = categoryResults
@@ -89,7 +98,7 @@ router.get("/get", (req, res) => {
                     post_date: post.post_date,
                     post_fk_cid: post.post_fk_cid,
                     post_fk_uid: post.post_fk_uid,
-                    amount_of_like: likeMap[post.post_id] || 0, // ✅ เพิ่มจำนวนไลก์
+                    amount_of_like: likeMap[post.post_id] || 0, // จำนวนไลก์
                     amount_of_save: post.amount_of_save,
                     amount_of_comment: post.amount_of_comment,
                   },
@@ -112,6 +121,7 @@ router.get("/get", (req, res) => {
                 };
               });
 
+              // ส่งข้อมูลโพสต์ทั้งหมดกลับไป
               res.status(200).json(postsWithData);
             });
           });
@@ -125,49 +135,58 @@ router.get("/get", (req, res) => {
 });
 
 
-  router.post('/like', (req, res) => {
-    const { user_id, post_id } = req.body;
+// --------------------------------------------
+// API POST /like
+// เพิ่มไลก์ของผู้ใช้ให้โพสต์
+// --------------------------------------------
+router.post('/like', (req, res) => {
+  const { user_id, post_id } = req.body;
 
-    if (!user_id || !post_id) {
-      console.log('[Like] Missing user_id or post_id');
-      return res.status(400).json({ error: 'user_id and post_id are required' });
+  if (!user_id || !post_id) {
+    console.log('[Like] Missing user_id or post_id');
+    return res.status(400).json({ error: 'user_id and post_id are required' });
+  }
+
+  // เช็คว่าผู้ใช้กดไลก์โพสต์นี้แล้วหรือยัง
+  const checkSql = 'SELECT * FROM post_likes WHERE user_id_fk = ? AND post_id_fk = ?';
+  conn.query(checkSql, [user_id, post_id], (err, results) => {
+    if (err) {
+      console.log('[Like] Check failed:', err);
+      return res.status(500).json({ error: 'Check failed' });
     }
 
-    const checkSql = 'SELECT * FROM post_likes WHERE user_id_fk = ? AND post_id_fk = ?';
-    conn.query(checkSql, [user_id, post_id], (err, results) => {
-      if (err) {
-        console.log('[Like] Check failed:', err);
-        return res.status(500).json({ error: 'Check failed' });
+    if (results.length > 0) {
+      console.log(`[Like] User ${user_id} already liked post ${post_id}`);
+      return res.status(400).json({ error: 'Already liked' });
+    }
+
+    // บันทึกการไลก์ในฐานข้อมูล
+    const insertSql = 'INSERT INTO post_likes (user_id_fk, post_id_fk) VALUES (?, ?)';
+    conn.query(insertSql, [user_id, post_id], (err2) => {
+      if (err2) {
+        console.log('[Like] Like insert failed:', err2);
+        return res.status(500).json({ error: 'Like insert failed' });
       }
 
-      if (results.length > 0) {
-        console.log(`[Like] User ${user_id} already liked post ${post_id}`);
-        return res.status(400).json({ error: 'Already liked' });
-      }
-
-      // บันทึกการไลก์
-      const insertSql = 'INSERT INTO post_likes (user_id_fk, post_id_fk) VALUES (?, ?)';
-      conn.query(insertSql, [user_id, post_id], (err2) => {
-        if (err2) {
-          console.log('[Like] Like insert failed:', err2);
-          return res.status(500).json({ error: 'Like insert failed' });
+      // อัพเดตจำนวนไลก์ในตารางโพสต์
+      const updatePostSql = 'UPDATE post SET amount_of_like = amount_of_like + 1 WHERE post_id = ?';
+      conn.query(updatePostSql, [post_id], (err3) => {
+        if (err3) {
+          console.log('[Like] Post update failed:', err3);
+          return res.status(500).json({ error: 'Post update failed' });
         }
-
-        // เพิ่มจำนวนไลก์ใน post table
-        const updatePostSql = 'UPDATE post SET amount_of_like = amount_of_like + 1 WHERE post_id = ?';
-        conn.query(updatePostSql, [post_id], (err3) => {
-          if (err3) {
-            console.log('[Like] Post update failed:', err3);
-            return res.status(500).json({ error: 'Post update failed' });
-          }
-          console.log(`[Like] User ${user_id} liked post ${post_id} successfully`);
-          res.status(200).json({ message: 'Liked' });
-        });
+        console.log(`[Like] User ${user_id} liked post ${post_id} successfully`);
+        res.status(200).json({ message: 'Liked' });
       });
     });
   });
+});
 
 
+// --------------------------------------------
+// API POST /unlike
+// ลบไลก์ของผู้ใช้ในโพสต์
+// --------------------------------------------
 router.post('/unlike', (req, res) => {
   const { user_id, post_id } = req.body;
 
@@ -176,6 +195,7 @@ router.post('/unlike', (req, res) => {
     return res.status(400).json({ error: 'user_id and post_id are required' });
   }
 
+  // ลบไลก์ของผู้ใช้ในโพสต์
   const deleteSql = 'DELETE FROM post_likes WHERE user_id_fk = ? AND post_id_fk = ?';
   conn.query(deleteSql, [user_id, post_id], (err, result) => {
     if (err) {
@@ -188,6 +208,7 @@ router.post('/unlike', (req, res) => {
       return res.status(404).json({ error: 'Like not found' });
     }
 
+    // ลดจำนวนไลก์ในตารางโพสต์ (อย่างน้อยต้องเป็น 0)
     const updatePostSql = 'UPDATE post SET amount_of_like = GREATEST(amount_of_like - 1, 0) WHERE post_id = ?';
     conn.query(updatePostSql, [post_id], (err2) => {
       if (err2) {
@@ -200,7 +221,10 @@ router.post('/unlike', (req, res) => {
   });
 });
 
-
+// --------------------------------------------
+// API GET /liked-posts/:user_id
+// ดึงโพสต์ที่ผู้ใช้กดไลก์ทั้งหมด (แค่ post_id)
+// --------------------------------------------
 router.get('/liked-posts/:user_id', (req, res) => {
   const { user_id } = req.params;
   const sql = 'SELECT post_id_fk FROM post_likes WHERE user_id_fk = ?';
@@ -212,10 +236,29 @@ router.get('/liked-posts/:user_id', (req, res) => {
   });
 });
 
+// ดึงจำนวนไลก์ของโพสต์
+router.get('/image_post/:post_id/likes', (req, res) => {
+  const postId = req.params.post_id;
+
+  const sql = 'SELECT amount_of_like FROM post WHERE post_id = ?';
+  conn.query(sql, [postId], (err, results) => {
+    if (err) {
+      console.log('[Get Like Count] Error:', err);
+      return res.status(500).json({ error: 'Query failed' });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+
+    res.status(200).json({ likeCount: results[0].amount_of_like });
+  });
+});
 
 
-
-// API เพิ่มโพสต์พร้อมรูปภาพ
+// --------------------------------------------
+// ฟังก์ชันวิเคราะห์ภาพด้วย Google Vision AI
+// --------------------------------------------
 const analyzeImageWithVision = async (imageUrl) => {
   try {
     const [result] = await client.labelDetection(imageUrl);
@@ -231,6 +274,10 @@ const analyzeImageWithVision = async (imageUrl) => {
   }
 };
 
+// --------------------------------------------
+// API POST /post/add
+// เพิ่มโพสต์พร้อมรูปภาพ, หมวดหมู่ และแฮชแท็ก
+// --------------------------------------------
 router.post('/post/add', (req, res) => {
   let { post_topic, post_description, post_fk_uid, images, category_id_fk, hashtags } = req.body;
 
@@ -254,6 +301,7 @@ router.post('/post/add', (req, res) => {
 
     const insertedPostId = postResult.insertId;
 
+    // ฟังก์ชันเพิ่มรูปภาพ
     const insertImages = () => {
       if (!images.length) return Promise.resolve();
       const insertImageSql = `INSERT INTO image_post (image, image_fk_postid) VALUES ?`;
@@ -266,6 +314,7 @@ router.post('/post/add', (req, res) => {
       });
     };
 
+    // ฟังก์ชันเพิ่มหมวดหมู่
     const insertCategories = () => {
       if (!Array.isArray(category_id_fk) || category_id_fk.length === 0) return Promise.resolve();
       const insertCategorySql = `INSERT INTO post_category (category_id_fk, post_id_fk) VALUES ?`;
@@ -278,6 +327,7 @@ router.post('/post/add', (req, res) => {
       });
     };
 
+    // ฟังก์ชันเพิ่มแฮชแท็ก
     const insertPostHashtags = () => {
       if (!Array.isArray(hashtags) || hashtags.length === 0) return Promise.resolve();
       const insertPostHashtagSql = `INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?`;
@@ -290,10 +340,10 @@ router.post('/post/add', (req, res) => {
       });
     };
 
-    // เรียก Promise ทั้ง 3 ฟังก์ชันพร้อมกัน
+    // เรียก Promise เพิ่มรูปภาพ, หมวดหมู่, แฮชแท็กพร้อมกัน
     Promise.all([insertImages(), insertCategories(), insertPostHashtags()])
       .then(async () => {
-        // วิเคราะห์ภาพด้วย Vision AI ทีละภาพ
+        // วิเคราะห์ภาพแต่ละภาพด้วย Vision AI
         if (images && images.length > 0) {
           console.log('🧠 เริ่มวิเคราะห์ภาพด้วย Vision AI...');
           for (const imgUrl of images) {
@@ -316,9 +366,10 @@ router.post('/post/add', (req, res) => {
   });
 });
 
-
-
-// ดึงโพสต์ทั้งหมดของ user ตาม uid
+// --------------------------------------------
+// API GET /by-user/:uid
+// ดึงโพสต์ทั้งหมดของผู้ใช้คนหนึ่ง พร้อมรูปภาพและหมวดหมู่
+// --------------------------------------------
 router.get("/by-user/:uid", (req, res) => {
   const { uid } = req.params;
 
@@ -403,10 +454,12 @@ router.get("/by-user/:uid", (req, res) => {
 router.get('/by-category/:cid', (req, res) => {
   const { cid } = req.params;
 
+  // ตรวจสอบว่าได้รับค่า cid หรือไม่
   if (!cid) {
     return res.status(400).json({ error: 'Missing category id (cid)' });
   }
 
+  // ดึงข้อมูลโพสต์ที่มี category ตรงกับ cid พร้อมข้อมูล user เจ้าของโพสต์
   const postSql = `
     SELECT 
       post.*, 
@@ -420,19 +473,22 @@ router.get('/by-category/:cid', (req, res) => {
     ORDER BY post.post_date DESC
   `;
 
+  // เรียก query เพื่อดึงโพสต์ตาม category
   conn.query(postSql, [cid], (err, postResults) => {
     if (err) {
       console.error(err);
       return res.status(500).json({ error: 'Post query error' });
     }
 
+    // กรณีไม่มีโพสต์ใน category นี้
     if (postResults.length === 0) {
       return res.status(404).json({ error: 'No posts found for this category' });
     }
 
+    // ดึง post_id ทั้งหมดเพื่อนำไปใช้ query รูปภาพและหมวดหมู่ต่อ
     const postIds = postResults.map(post => post.post_id);
 
-    // ดึงรูปภาพทั้งหมด
+    // ดึงรูปภาพทั้งหมดของโพสต์ที่ match post_id
     const imageSql = `SELECT * FROM image_post WHERE image_fk_postid IN (?)`;
     conn.query(imageSql, [postIds], (err, imageResults) => {
       if (err) {
@@ -440,7 +496,7 @@ router.get('/by-category/:cid', (req, res) => {
         return res.status(500).json({ error: 'Image query error' });
       }
 
-      // ✅ ดึงหมวดหมู่ทั้งหมดของโพสต์ที่ match cid
+      // ดึงหมวดหมู่ทั้งหมดของโพสต์ที่ match post_id
       const categorySql = `
         SELECT 
           pc.post_id_fk, 
@@ -450,12 +506,14 @@ router.get('/by-category/:cid', (req, res) => {
         WHERE pc.post_id_fk IN (?)
       `;
 
+      // เรียก query หมวดหมู่
       conn.query(categorySql, [postIds], (err, categoryResults) => {
         if (err) {
           console.error(err);
           return res.status(500).json({ error: 'Category query error' });
         }
 
+        // รวมข้อมูลโพสต์, user, รูปภาพ, หมวดหมู่ เป็นอ็อบเจกต์เดียวกัน
         const postsWithData = postResults.map(post => {
           const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
           const categories = categoryResults
@@ -497,15 +555,19 @@ router.get('/by-category/:cid', (req, res) => {
           };
         });
 
+        // ส่งข้อมูลโพสต์ทั้งหมดกลับไปใน response
         res.status(200).json(postsWithData);
       });
     });
   });
 });
 
+
+// API ดึงโพสต์ทั้งหมดที่ user กดไลก์ พร้อมข้อมูลครบถ้วนของโพสต์นั้น ๆ
 router.get('/liked-posts/full/:user_id', (req, res) => {
   const { user_id } = req.params;
 
+  // Query ดึงโพสต์ที่ user กดไลก์ พร้อมข้อมูล user เจ้าของโพสต์ และเวลาที่กดไลก์
   const likedPostSql = `
   SELECT 
     p.*, 
@@ -520,19 +582,24 @@ router.get('/liked-posts/full/:user_id', (req, res) => {
   ORDER BY pl.created_at DESC
 `;
 
+  // เรียก query ดึงโพสต์ที่ถูกไลก์ทั้งหมดของ user นี้
   conn.query(likedPostSql, [user_id], (err, postResults) => {
     if (err) return res.status(500).json({ error: 'Post query failed' });
 
+    // กรณี user นี้ยังไม่ได้กดไลก์โพสต์ใดเลย
     if (postResults.length === 0) {
       return res.status(404).json({ error: 'No liked posts found for this user' });
     }
 
+    // ดึง post_id ทั้งหมดเพื่อ query รูปภาพ, หมวดหมู่, แฮชแท็ก และจำนวนไลก์
     const postIds = postResults.map(post => post.post_id);
 
+    // ดึงรูปภาพของโพสต์ทั้งหมดที่ถูกไลก์
     const imageSql = `SELECT * FROM image_post WHERE image_fk_postid IN (?)`;
     conn.query(imageSql, [postIds], (err, imageResults) => {
       if (err) return res.status(500).json({ error: 'Image query failed' });
 
+      // ดึงหมวดหมู่ทั้งหมดของโพสต์ที่ถูกไลก์
       const categorySql = `
         SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
         FROM post_category pc
@@ -542,6 +609,7 @@ router.get('/liked-posts/full/:user_id', (req, res) => {
       conn.query(categorySql, [postIds], (err, categoryResults) => {
         if (err) return res.status(500).json({ error: 'Category query failed' });
 
+        // ดึงแฮชแท็กทั้งหมดของโพสต์ที่ถูกไลก์
         const hashtagSql = `
           SELECT ph.post_id_fk, h.tag_id, h.tag_name
           FROM post_hashtags ph
@@ -551,6 +619,7 @@ router.get('/liked-posts/full/:user_id', (req, res) => {
         conn.query(hashtagSql, [postIds], (err, hashtagResults) => {
           if (err) return res.status(500).json({ error: 'Hashtag query failed' });
 
+          // ดึงจำนวนไลก์ทั้งหมดของแต่ละโพสต์
           const likeSql = `
             SELECT post_id_fk AS post_id, COUNT(*) AS like_count
             FROM post_likes
@@ -559,11 +628,13 @@ router.get('/liked-posts/full/:user_id', (req, res) => {
           conn.query(likeSql, (err, likeResults) => {
             if (err) return res.status(500).json({ error: 'Like count query failed' });
 
+            // สร้าง map สำหรับเก็บจำนวนไลก์ของแต่ละโพสต์
             const likeMap = {};
             likeResults.forEach(l => {
               likeMap[l.post_id] = l.like_count;
             });
 
+            // รวมข้อมูลโพสต์, user, รูปภาพ, หมวดหมู่, แฮชแท็ก และจำนวนไลก์ เป็นอ็อบเจกต์เดียวกัน
             const postsWithData = postResults.map(post => {
               const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
               const categories = categoryResults
@@ -612,6 +683,7 @@ router.get('/liked-posts/full/:user_id', (req, res) => {
               };
             });
 
+            // ส่งข้อมูลโพสต์ทั้งหมดที่ user กดไลก์กลับไป
             res.status(200).json(postsWithData);
           });
         });
