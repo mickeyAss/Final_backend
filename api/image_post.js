@@ -237,7 +237,7 @@ router.get('/liked-posts/:user_id', (req, res) => {
 });
 
 // ดึงจำนวนไลก์ของโพสต์
-router.get('/image_post/:post_id/likes', (req, res) => {
+router.get('/:post_id/likes', (req, res) => {
   const postId = req.params.post_id;
 
   const sql = 'SELECT amount_of_like FROM post WHERE post_id = ?';
@@ -378,7 +378,19 @@ router.get("/by-user/:uid", (req, res) => {
   }
 
   const postSql = `
-    SELECT post.* 
+    SELECT 
+      post.*, 
+      user.uid AS user_uid,
+      user.name AS user_name,
+      user.email AS user_email,
+      user.height AS user_height,
+      user.weight AS user_weight,
+      user.shirt_size AS user_shirt_size,
+      user.chest AS user_chest,
+      user.waist_circumference AS user_waist,
+      user.hip AS user_hip,
+      user.personal_description AS user_description,
+      user.profile_image AS user_profile_image
     FROM post
     JOIN user ON post.post_fk_uid = user.uid
     WHERE user.uid = ?
@@ -440,7 +452,20 @@ router.get("/by-user/:uid", (req, res) => {
               post_fk_uid: post.post_fk_uid,
             },
             images,
-            categories
+            categories,
+            user: {
+              uid: post.user_uid,
+              name: post.user_name,
+              email: post.user_email,
+              height: post.user_height,
+              weight: post.user_weight,
+              shirt_size: post.user_shirt_size,
+              chest: post.user_chest,
+              waist_circumference: post.user_waist,
+              hip: post.user_hip,
+              personal_description: post.user_description,
+              profile_image: post.user_profile_image
+            }
           };
         });
 
@@ -449,6 +474,7 @@ router.get("/by-user/:uid", (req, res) => {
     });
   });
 });
+
 
 // API ดึงโพสต์ทั้งหมดที่มี category cid ตรงกับ param cid
 router.get('/by-category/:cid', (req, res) => {
