@@ -2,12 +2,6 @@ var express = require('express');
 var router = express.Router();
 var conn = require('../dbconnect')
 
-// โหลด Google Cloud Vision API client สำหรับวิเคราะห์ภาพ
-const vision = require('@google-cloud/vision');
-const client = new vision.ImageAnnotatorClient({
-  keyFilename: 'final-project-465814-1278faeb06a3.json' // ไฟล์ service account ของ Google Cloud Vision
-});
-
 module.exports = router;
 
 // --------------------------------------------
@@ -255,25 +249,6 @@ router.get('/:post_id/likes', (req, res) => {
   });
 });
 
-
-// --------------------------------------------
-// ฟังก์ชันวิเคราะห์ภาพด้วย Google Vision AI
-// --------------------------------------------
-const analyzeImageWithVision = async (imageUrl) => {
-  try {
-    const [result] = await client.labelDetection(imageUrl);
-    const labels = result.labelAnnotations || [];
-    console.log(`🔍 Vision AI วิเคราะห์ภาพ: ${imageUrl}`);
-    labels.forEach(label => {
-      console.log(`- ${label.description} (score: ${label.score.toFixed(2)})`);
-    });
-    return labels;
-  } catch (err) {
-    console.error('❌ Vision AI Error:', err);
-    return [];
-  }
-};
-
 // --------------------------------------------
 // API POST /post/add
 // เพิ่มโพสต์พร้อมรูปภาพ, หมวดหมู่ และแฮชแท็ก
@@ -302,7 +277,6 @@ router.post('/post/add', (req, res) => {
 
     const insertedPostId = postResult.insertId;
 
-    // ⬇️ ใส่ไว้เหมือนเดิม (image / category / hashtag)
     const insertImages = () => {
       if (!images.length) return Promise.resolve();
       const insertImageSql = `INSERT INTO image_post (image, image_fk_postid) VALUES ?`;
@@ -340,24 +314,12 @@ router.post('/post/add', (req, res) => {
     };
 
     Promise.all([insertImages(), insertCategories(), insertPostHashtags()])
-      .then(async () => {
-        const visionResults = [];
-        if (images && images.length > 0) {
-          console.log('🧠 เริ่มวิเคราะห์ภาพด้วย Vision AI...');
-          for (const imgUrl of images) {
-            const labels = await analyzeImageWithVision(imgUrl);
-            visionResults.push({
-              image: imgUrl,
-              labels: labels.map(l => l.description)
-            });
-          }
-        }
-
+      .then(() => {
         res.status(201).json({
           message: 'Post, images, categories, hashtags inserted',
           post_id: insertedPostId,
           post_status,
-          vision: visionResults
+          vision: [] // ถ้าไม่ต้องการส่ง สามารถลบ field นี้ออกได้เลย
         });
       })
       .catch((err) => {
