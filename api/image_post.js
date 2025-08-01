@@ -279,21 +279,22 @@ const analyzeImageWithVision = async (imageUrl) => {
 // เพิ่มโพสต์พร้อมรูปภาพ, หมวดหมู่ และแฮชแท็ก
 // --------------------------------------------
 router.post('/post/add', (req, res) => {
-  let { post_topic, post_description, post_fk_uid, images, category_id_fk, hashtags } = req.body;
+  let { post_topic, post_description, post_fk_uid, images, category_id_fk, hashtags, post_status } = req.body;
 
   post_topic = post_topic?.trim() === '' ? null : post_topic;
   post_description = post_description?.trim() === '' ? null : post_description;
+  post_status = post_status === 'friends' ? 'friends' : 'public'; // fallback เป็น public
 
   if (!post_fk_uid || !Array.isArray(images)) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
   const insertPostSql = `
-    INSERT INTO post (post_topic, post_description, post_date, post_fk_uid)
-    VALUES (?, ?, NOW(), ?)
+    INSERT INTO post (post_topic, post_description, post_date, post_fk_uid, post_status)
+    VALUES (?, ?, NOW(), ?, ?)
   `;
 
-  conn.query(insertPostSql, [post_topic, post_description, post_fk_uid], async (err, postResult) => {
+  conn.query(insertPostSql, [post_topic, post_description, post_fk_uid, post_status], async (err, postResult) => {
     if (err) {
       console.error(err);
       return res.status(500).json({ error: 'Failed to insert post' });
@@ -301,7 +302,7 @@ router.post('/post/add', (req, res) => {
 
     const insertedPostId = postResult.insertId;
 
-    // ฟังก์ชันเพิ่มรูปภาพ
+    // ⬇️ ใส่ไว้เหมือนเดิม (image / category / hashtag)
     const insertImages = () => {
       if (!images.length) return Promise.resolve();
       const insertImageSql = `INSERT INTO image_post (image, image_fk_postid) VALUES ?`;
@@ -314,7 +315,6 @@ router.post('/post/add', (req, res) => {
       });
     };
 
-    // ฟังก์ชันเพิ่มหมวดหมู่
     const insertCategories = () => {
       if (!Array.isArray(category_id_fk) || category_id_fk.length === 0) return Promise.resolve();
       const insertCategorySql = `INSERT INTO post_category (category_id_fk, post_id_fk) VALUES ?`;
@@ -327,7 +327,6 @@ router.post('/post/add', (req, res) => {
       });
     };
 
-    // ฟังก์ชันเพิ่มแฮชแท็ก
     const insertPostHashtags = () => {
       if (!Array.isArray(hashtags) || hashtags.length === 0) return Promise.resolve();
       const insertPostHashtagSql = `INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?`;
@@ -340,10 +339,8 @@ router.post('/post/add', (req, res) => {
       });
     };
 
-    // เรียก Promise พร้อมกัน
     Promise.all([insertImages(), insertCategories(), insertPostHashtags()])
       .then(async () => {
-        // วิเคราะห์ภาพด้วย Vision AI แล้วเก็บ labels
         const visionResults = [];
         if (images && images.length > 0) {
           console.log('🧠 เริ่มวิเคราะห์ภาพด้วย Vision AI...');
@@ -351,17 +348,15 @@ router.post('/post/add', (req, res) => {
             const labels = await analyzeImageWithVision(imgUrl);
             visionResults.push({
               image: imgUrl,
-              labels: labels.map(l => l.description) // เอาเฉพาะชื่อ label
+              labels: labels.map(l => l.description)
             });
           }
         }
 
         res.status(201).json({
-          message: 'Post, images, categories, and hashtags inserted successfully',
+          message: 'Post, images, categories, hashtags inserted',
           post_id: insertedPostId,
-          images_count: images.length,
-          categories_count: Array.isArray(category_id_fk) ? category_id_fk.length : 0,
-          hashtags_count: Array.isArray(hashtags) ? hashtags.length : 0,
+          post_status,
           vision: visionResults
         });
       })
@@ -371,6 +366,7 @@ router.post('/post/add', (req, res) => {
       });
   });
 });
+
 
 
 // --------------------------------------------
