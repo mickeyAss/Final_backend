@@ -283,7 +283,7 @@ router.post('/post/add', (req, res) => {
 
   post_topic = post_topic?.trim() === '' ? null : post_topic;
   post_description = post_description?.trim() === '' ? null : post_description;
-  post_status = post_status === 'friends' ? 'friends' : 'public'; // fallback เป็น public
+  post_status = (typeof post_status === 'string' && post_status.trim().toLowerCase() === 'friends') ? 'friends' : 'public';
 
   if (!post_fk_uid || !Array.isArray(images)) {
     return res.status(400).json({ error: 'Missing required fields' });
