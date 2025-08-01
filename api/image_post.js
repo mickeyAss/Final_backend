@@ -340,14 +340,19 @@ router.post('/post/add', (req, res) => {
       });
     };
 
-    // เรียก Promise เพิ่มรูปภาพ, หมวดหมู่, แฮชแท็กพร้อมกัน
+    // เรียก Promise พร้อมกัน
     Promise.all([insertImages(), insertCategories(), insertPostHashtags()])
       .then(async () => {
-        // วิเคราะห์ภาพแต่ละภาพด้วย Vision AI
+        // วิเคราะห์ภาพด้วย Vision AI แล้วเก็บ labels
+        const visionResults = [];
         if (images && images.length > 0) {
           console.log('🧠 เริ่มวิเคราะห์ภาพด้วย Vision AI...');
           for (const imgUrl of images) {
-            await analyzeImageWithVision(imgUrl);
+            const labels = await analyzeImageWithVision(imgUrl);
+            visionResults.push({
+              image: imgUrl,
+              labels: labels.map(l => l.description) // เอาเฉพาะชื่อ label
+            });
           }
         }
 
@@ -357,6 +362,7 @@ router.post('/post/add', (req, res) => {
           images_count: images.length,
           categories_count: Array.isArray(category_id_fk) ? category_id_fk.length : 0,
           hashtags_count: Array.isArray(hashtags) ? hashtags.length : 0,
+          vision: visionResults
         });
       })
       .catch((err) => {
@@ -365,6 +371,7 @@ router.post('/post/add', (req, res) => {
       });
   });
 });
+
 
 // --------------------------------------------
 // API GET /by-user/:uid
@@ -378,19 +385,7 @@ router.get("/by-user/:uid", (req, res) => {
   }
 
   const postSql = `
-    SELECT 
-      post.*, 
-      user.uid AS user_uid,
-      user.name AS user_name,
-      user.email AS user_email,
-      user.height AS user_height,
-      user.weight AS user_weight,
-      user.shirt_size AS user_shirt_size,
-      user.chest AS user_chest,
-      user.waist_circumference AS user_waist,
-      user.hip AS user_hip,
-      user.personal_description AS user_description,
-      user.profile_image AS user_profile_image
+    SELECT post.* 
     FROM post
     JOIN user ON post.post_fk_uid = user.uid
     WHERE user.uid = ?
@@ -452,20 +447,7 @@ router.get("/by-user/:uid", (req, res) => {
               post_fk_uid: post.post_fk_uid,
             },
             images,
-            categories,
-            user: {
-              uid: post.user_uid,
-              name: post.user_name,
-              email: post.user_email,
-              height: post.user_height,
-              weight: post.user_weight,
-              shirt_size: post.user_shirt_size,
-              chest: post.user_chest,
-              waist_circumference: post.user_waist,
-              hip: post.user_hip,
-              personal_description: post.user_description,
-              profile_image: post.user_profile_image
-            }
+            categories
           };
         });
 
@@ -474,7 +456,6 @@ router.get("/by-user/:uid", (req, res) => {
     });
   });
 });
-
 
 // API ดึงโพสต์ทั้งหมดที่มี category cid ตรงกับ param cid
 router.get('/by-category/:cid', (req, res) => {
