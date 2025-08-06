@@ -2,6 +2,7 @@ var express = require('express');
 var router = express.Router();
 var conn = require('../dbconnect')
 
+
 module.exports = router;
 
 // --------------------------------------------
@@ -253,7 +254,20 @@ router.get('/:post_id/likes', (req, res) => {
 // API POST /post/add
 // เพิ่มโพสต์พร้อมรูปภาพ, หมวดหมู่ และแฮชแท็ก
 // --------------------------------------------
-router.post('/post/add', (req, res) => {
+
+const vision = require('@google-cloud/vision');
+const { Translate } = require('@google-cloud/translate').v2;
+
+// สร้าง client ของ Google Vision
+const visionClient = new vision.ImageAnnotatorClient({
+  keyFilename: 'D:/Project Appication/final_project_backend/practical-now-465814-r5-fc7948fa14db.json',
+});
+const translateClient = new Translate({
+  keyFilename: 'D:/Project Appication/final_project_backend/practical-now-465814-r5-2d95bf6ba8d7.json', // ใส่ path ให้ถูกต้อง
+  projectId: 'practical-now-465814-r5',
+});
+
+router.post('/post/add', async (req, res) => {
   let { post_topic, post_description, post_fk_uid, images, category_id_fk, hashtags, post_status } = req.body;
 
   post_topic = post_topic?.trim() === '' ? null : post_topic;
@@ -277,6 +291,30 @@ router.post('/post/add', (req, res) => {
 
     const insertedPostId = postResult.insertId;
 
+    // วิเคราะห์ภาพ: ดึง label ทั้งหมด + แปลเป็นไทย
+    const analyzeImageLabels = async (imageUri) => {
+      try {
+        const [result] = await visionClient.labelDetection(imageUri);
+        const labels = result.labelAnnotations.map(label => label.description);
+
+        if (labels.length === 0) return ['ไม่พบวัตถุในภาพ'];
+
+        const [translated] = await translateClient.translate(labels, 'th');
+        return translated;
+      } catch (e) {
+        console.error(`Label detection error for image ${imageUri}:`, e);
+        return ['เกิดข้อผิดพลาดในการวิเคราะห์ภาพ'];
+      }
+    };
+
+    let labelResults = [];
+    try {
+      labelResults = await Promise.all(images.map(imgUrl => analyzeImageLabels(imgUrl)));
+    } catch (e) {
+      console.warn('Error during label detection:', e);
+    }
+
+    // ฟังก์ชันแทรกรูปภาพ
     const insertImages = () => {
       if (!images.length) return Promise.resolve();
       const insertImageSql = `INSERT INTO image_post (image, image_fk_postid) VALUES ?`;
@@ -289,6 +327,7 @@ router.post('/post/add', (req, res) => {
       });
     };
 
+    // ฟังก์ชันแทรกหมวดหมู่
     const insertCategories = () => {
       if (!Array.isArray(category_id_fk) || category_id_fk.length === 0) return Promise.resolve();
       const insertCategorySql = `INSERT INTO post_category (category_id_fk, post_id_fk) VALUES ?`;
@@ -301,6 +340,7 @@ router.post('/post/add', (req, res) => {
       });
     };
 
+    // ฟังก์ชันแทรกแฮชแท็ก
     const insertPostHashtags = () => {
       if (!Array.isArray(hashtags) || hashtags.length === 0) return Promise.resolve();
       const insertPostHashtagSql = `INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?`;
@@ -313,23 +353,45 @@ router.post('/post/add', (req, res) => {
       });
     };
 
-    Promise.all([insertImages(), insertCategories(), insertPostHashtags()])
+    // ฟังก์ชันแทรกข้อความวิเคราะห์ภาพ
+    const insertImageAnalysis = () => {
+      if (!labelResults.length) return Promise.resolve();
+
+      const values = labelResults.map((texts, idx) => [
+        insertedPostId,
+        images[idx],
+        Array.isArray(texts) ? texts.join(', ') : texts,
+      ]);
+
+      const sql = `INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text) VALUES ?`;
+      return new Promise((resolve, reject) => {
+        conn.query(sql, [values], (err) => {
+          if (err) return reject(err);
+          resolve();
+        });
+      });
+    };
+
+    Promise.all([
+      insertImages(),
+      insertCategories(),
+      insertPostHashtags(),
+      insertImageAnalysis(),
+    ])
       .then(() => {
         res.status(201).json({
-          message: 'Post, images, categories, hashtags inserted',
+          message: 'Post, images, categories, hashtags, analysis inserted',
           post_id: insertedPostId,
           post_status,
-          vision: [] // ถ้าไม่ต้องการส่ง สามารถลบ field นี้ออกได้เลย
+          image_analysis: labelResults,
         });
       })
       .catch((err) => {
         console.error(err);
-        res.status(500).json({ error: 'Failed to insert images, categories, or hashtags' });
+        res.status(500).json({ error: 'Failed to insert images, categories, hashtags, or analysis' });
       });
   });
 });
-
-
 
 // --------------------------------------------
 // API GET /by-user/:uid
