@@ -803,33 +803,40 @@ router.get('/liked-posts/full/:user_id', (req, res) => {
 
 // API GET /saved-posts/full/:user_id
 router.get('/saved-posts/full/:user_id', (req, res) => {
-  const user_id = req.params.user_id;
+  const { user_id } = req.params;
 
-  // ดึงโพสต์ที่ถูกเซฟทั้งหมดของ user นี้
+  // Query ดึงโพสต์ที่ user กด save พร้อมข้อมูล user เจ้าของโพสต์ และเวลาที่กด save
   const savedPostSql = `
-    SELECT p.*, u.uid, u.name, u.email, u.height, u.weight, u.shirt_size, u.chest, u.waist_circumference, u.hip, u.personal_description, u.profile_image
+    SELECT 
+      p.*, 
+      u.uid, u.name, u.email, u.height, u.weight, 
+      u.shirt_size, u.chest, u.waist_circumference, 
+      u.hip, u.personal_description, u.profile_image,
+      ps.created_at AS saved_at
     FROM post_saves ps
     JOIN post p ON ps.post_id_fk = p.post_id
     JOIN user u ON p.post_fk_uid = u.uid
     WHERE ps.user_id_fk = ?
+    ORDER BY ps.created_at DESC
   `;
 
+  // เรียก query ดึงโพสต์ที่ถูกบันทึกทั้งหมดของ user นี้
   conn.query(savedPostSql, [user_id], (err, postResults) => {
     if (err) return res.status(500).json({ error: 'Post query failed' });
 
-    // กรณี user นี้ยังไม่ได้เซฟโพสต์ใดเลย
+    // กรณี user นี้ยังไม่ได้บันทึกโพสต์ใดเลย
     if (postResults.length === 0) {
       return res.status(404).json({ error: 'No saved posts found for this user' });
     }
 
     const postIds = postResults.map(post => post.post_id);
 
-    // ดึงรูปภาพของโพสต์ทั้งหมดที่ถูกเซฟ
+    // ดึงรูปภาพของโพสต์ทั้งหมดที่ถูกบันทึก
     const imageSql = `SELECT * FROM image_post WHERE image_fk_postid IN (?)`;
     conn.query(imageSql, [postIds], (err, imageResults) => {
       if (err) return res.status(500).json({ error: 'Image query failed' });
 
-      // ดึงหมวดหมู่ของโพสต์ทั้งหมดที่ถูกเซฟ
+      // ดึงหมวดหมู่ทั้งหมดของโพสต์ที่ถูกบันทึก
       const categorySql = `
         SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
         FROM post_category pc
@@ -839,7 +846,7 @@ router.get('/saved-posts/full/:user_id', (req, res) => {
       conn.query(categorySql, [postIds], (err, categoryResults) => {
         if (err) return res.status(500).json({ error: 'Category query failed' });
 
-        // ดึงแฮชแท็กของโพสต์ทั้งหมดที่ถูกเซฟ
+        // ดึงแฮชแท็กทั้งหมดของโพสต์ที่ถูกบันทึก
         const hashtagSql = `
           SELECT ph.post_id_fk, h.tag_id, h.tag_name
           FROM post_hashtags ph
@@ -849,7 +856,7 @@ router.get('/saved-posts/full/:user_id', (req, res) => {
         conn.query(hashtagSql, [postIds], (err, hashtagResults) => {
           if (err) return res.status(500).json({ error: 'Hashtag query failed' });
 
-          // ดึงจำนวนไลก์ทั้งหมดของแต่ละโพสต์ (ถ้าต้องการ)
+          // ดึงจำนวนไลก์ทั้งหมดของแต่ละโพสต์
           const likeSql = `
             SELECT post_id_fk AS post_id, COUNT(*) AS like_count
             FROM post_likes
@@ -858,85 +865,70 @@ router.get('/saved-posts/full/:user_id', (req, res) => {
           conn.query(likeSql, (err, likeResults) => {
             if (err) return res.status(500).json({ error: 'Like count query failed' });
 
-            // ดึงจำนวนเซฟทั้งหมดของแต่ละโพสต์ (ถ้าต้องการ)
-            const saveSql = `
-              SELECT post_id_fk AS post_id, COUNT(*) AS save_count
-              FROM post_saves
-              GROUP BY post_id_fk
-            `;
-            conn.query(saveSql, (err, saveResults) => {
-              if (err) return res.status(500).json({ error: 'Save count query failed' });
-
-              // สร้าง map สำหรับจำนวนไลก์และจำนวนเซฟของแต่ละโพสต์
-              const likeMap = {};
-              likeResults.forEach(l => {
-                likeMap[l.post_id] = l.like_count;
-              });
-
-              const saveMap = {};
-              saveResults.forEach(s => {
-                saveMap[s.post_id] = s.save_count;
-              });
-
-              // รวมข้อมูลโพสต์, user, รูปภาพ, หมวดหมู่, แฮชแท็ก, จำนวนไลก์, จำนวนเซฟ
-              const postsWithData = postResults.map(post => {
-                const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
-                const categories = categoryResults
-                  .filter(cat => cat.post_id_fk === post.post_id)
-                  .map(cat => ({
-                    cid: cat.cid,
-                    cname: cat.cname,
-                    cimage: cat.cimage,
-                    ctype: cat.ctype
-                  }));
-                const hashtags = hashtagResults
-                  .filter(ht => ht.post_id_fk === post.post_id)
-                  .map(ht => ({
-                    tag_id: ht.tag_id,
-                    tag_name: ht.tag_name
-                  }));
-
-                return {
-                  post: {
-                    post_id: post.post_id,
-                    post_topic: post.post_topic,
-                    post_description: post.post_description,
-                    post_date: post.post_date,
-                    post_fk_cid: post.post_fk_cid,
-                    post_fk_uid: post.post_fk_uid,
-                    amount_of_like: likeMap[post.post_id] || 0,
-                    amount_of_save: saveMap[post.post_id] || 0,
-                    amount_of_comment: post.amount_of_comment
-                  },
-                  user: {
-                    uid: post.uid,
-                    name: post.name,
-                    email: post.email,
-                    height: post.height,
-                    weight: post.weight,
-                    shirt_size: post.shirt_size,
-                    chest: post.chest,
-                    waist_circumference: post.waist_circumference,
-                    hip: post.hip,
-                    personal_description: post.personal_description,
-                    profile_image: post.profile_image
-                  },
-                  images,
-                  categories,
-                  hashtags
-                };
-              });
-
-              // ส่งข้อมูลโพสต์ทั้งหมดที่ user เซฟกลับไป
-              res.status(200).json(postsWithData);
+            // สร้าง map สำหรับเก็บจำนวนไลก์ของแต่ละโพสต์
+            const likeMap = {};
+            likeResults.forEach(l => {
+              likeMap[l.post_id] = l.like_count;
             });
+
+            // รวมข้อมูลโพสต์, user, รูปภาพ, หมวดหมู่, แฮชแท็ก, จำนวนไลก์ และเวลาที่ save เป็นอ็อบเจกต์เดียวกัน
+            const postsWithData = postResults.map(post => {
+              const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
+              const categories = categoryResults
+                .filter(cat => cat.post_id_fk === post.post_id)
+                .map(cat => ({
+                  cid: cat.cid,
+                  cname: cat.cname,
+                  cimage: cat.cimage,
+                  ctype: cat.ctype
+                }));
+              const hashtags = hashtagResults
+                .filter(ht => ht.post_id_fk === post.post_id)
+                .map(ht => ({
+                  tag_id: ht.tag_id,
+                  tag_name: ht.tag_name
+                }));
+
+              return {
+                post: {
+                  post_id: post.post_id,
+                  post_topic: post.post_topic,
+                  post_description: post.post_description,
+                  post_date: post.post_date,
+                  post_fk_cid: post.post_fk_cid,
+                  post_fk_uid: post.post_fk_uid,
+                  amount_of_like: likeMap[post.post_id] || 0,
+                  amount_of_save: post.amount_of_save,
+                  amount_of_comment: post.amount_of_comment,
+                },
+                user: {
+                  uid: post.uid,
+                  name: post.name,
+                  email: post.email,
+                  height: post.height,
+                  weight: post.weight,
+                  shirt_size: post.shirt_size,
+                  chest: post.chest,
+                  waist_circumference: post.waist_circumference,
+                  hip: post.hip,
+                  personal_description: post.personal_description,
+                  profile_image: post.profile_image,
+                },
+                images,
+                categories,
+                hashtags,
+                saved_at: post.saved_at  // เพิ่มเวลาที่ save เข้ามาด้วย
+              };
+            });
+
+            // ส่งข้อมูลโพสต์ทั้งหมดที่ user บันทึกกลับไป
+            res.status(200).json(postsWithData);
           });
         });
       });
     });
   });
 });
-
 
 
 // --------------------------------------------
