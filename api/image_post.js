@@ -251,6 +251,88 @@ router.get('/:post_id/likes', (req, res) => {
 });
 
 // --------------------------------------------
+// API POST /save
+// บันทึกโพสต์ของผู้ใช้
+// --------------------------------------------
+router.post('/save', (req, res) => {
+  const { user_id, post_id } = req.body;
+
+  if (!user_id || !post_id) {
+    console.log('[Save] Missing user_id or post_id');
+    return res.status(400).json({ error: 'user_id and post_id are required' });
+  }
+
+  // เช็คว่าผู้ใช้บันทึกโพสต์นี้แล้วหรือยัง
+  const checkSql = 'SELECT * FROM post_saves WHERE user_id_fk = ? AND post_id_fk = ?';
+  conn.query(checkSql, [user_id, post_id], (err, results) => {
+    if (err) {
+      console.log('[Save] Check failed:', err);
+      return res.status(500).json({ error: 'Check failed' });
+    }
+
+    if (results.length > 0) {
+      console.log(`[Save] User ${user_id} already saved post ${post_id}`);
+      return res.status(400).json({ error: 'Already saved' });
+    }
+
+    // บันทึกการเซฟโพสต์
+    const insertSql = 'INSERT INTO post_saves (user_id_fk, post_id_fk) VALUES (?, ?)';
+    conn.query(insertSql, [user_id, post_id], (err2) => {
+      if (err2) {
+        console.log('[Save] Save insert failed:', err2);
+        return res.status(500).json({ error: 'Save insert failed' });
+      }
+      console.log(`[Save] User ${user_id} saved post ${post_id} successfully`);
+      res.status(200).json({ message: 'Saved' });
+    });
+  });
+});
+
+// --------------------------------------------
+// API POST /unsave
+// ลบโพสต์ที่ผู้ใช้บันทึกไว้
+// --------------------------------------------
+router.post('/unsave', (req, res) => {
+  const { user_id, post_id } = req.body;
+
+  if (!user_id || !post_id) {
+    console.log('[Unsave] Missing user_id or post_id');
+    return res.status(400).json({ error: 'user_id and post_id are required' });
+  }
+
+  const deleteSql = 'DELETE FROM post_saves WHERE user_id_fk = ? AND post_id_fk = ?';
+  conn.query(deleteSql, [user_id, post_id], (err, result) => {
+    if (err) {
+      console.log('[Unsave] Unsave failed:', err);
+      return res.status(500).json({ error: 'Unsave failed' });
+    }
+
+    if (result.affectedRows === 0) {
+      console.log(`[Unsave] Save not found for user ${user_id} and post ${post_id}`);
+      return res.status(404).json({ error: 'Save not found' });
+    }
+
+    console.log(`[Unsave] User ${user_id} unsaved post ${post_id} successfully`);
+    res.status(200).json({ message: 'Unsaved' });
+  });
+});
+
+// --------------------------------------------
+// API GET /saved-posts/:user_id
+// ดึงโพสต์ที่ผู้ใช้บันทึกทั้งหมด (แค่ post_id)
+// --------------------------------------------
+router.get('/saved-posts/:user_id', (req, res) => {
+  const { user_id } = req.params;
+  const sql = 'SELECT post_id_fk FROM post_saves WHERE user_id_fk = ?';
+
+  conn.query(sql, [user_id], (err, results) => {
+    if (err) return res.status(500).json({ error: 'Query failed' });
+    const savedPostIds = results.map(row => row.post_id_fk);
+    res.status(200).json({ savedPostIds });
+  });
+});
+
+// --------------------------------------------
 // API POST /post/add
 // เพิ่มโพสต์พร้อมรูปภาพ, หมวดหมู่ และแฮชแท็ก
 // --------------------------------------------
