@@ -290,38 +290,17 @@ router.post("/follow", (req, res) => {
 
     // ถ้าเพิ่มติดตามสำเร็จ ให้บันทึกแจ้งเตือน (ถ้าไม่ใช่ติดตามตัวเอง)
     if (follower_id !== following_id) {
-      const message = 'ได้ติดตามคุณ';
-
-      // Insert ลง MySQL
       const notifSql = `
         INSERT INTO notifications (sender_uid, receiver_uid, type, message)
         VALUES (?, ?, 'follow', ?)
       `;
+      const message = 'ได้ติดตามคุณ';
       conn.query(notifSql, [follower_id, following_id, message], (err2) => {
         if (err2) {
           console.error('[Follow] Notification insert failed:', err2);
+          // ไม่ return error เพราะไม่อยากให้การติดตามล้มเหลวเพราะแจ้งเตือน
         }
       });
-
-      // Insert ลง Firebase
-      const notifData = {
-        sender_uid: follower_id,
-        receiver_uid: following_id,
-        type: 'follow',
-        message: message,
-        is_read: false,
-        created_at: admin.database.ServerValue.TIMESTAMP
-      };
-
-      const db = admin.database();
-      const notifRef = db.ref('notifications').push();
-      notifRef.set(notifData)
-        .then(() => {
-          console.log('[Follow] Notification added to Firebase');
-        })
-        .catch((firebaseErr) => {
-          console.log('[Follow] Firebase notification insert failed:', firebaseErr);
-        });
     }
 
     return res.status(200).json({ message: "ติดตามสำเร็จ" });
