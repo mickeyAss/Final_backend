@@ -391,8 +391,8 @@ router.get("/following-count/:uid", (req, res) => {
   });
 });
 
-// GET /notifications/:uid  --> ดึงแจ้งเตือนของ user id นี้
-// GET /notifications/:uid  --> ดึงแจ้งเตือนของ user id นี้ พร้อมข้อมูลผู้ส่ง (sender)
+// GET /notifications/:uid  --> ดึงแจ้งเตือนของ user id นี้ พร้อมข้อมูลผู้ส่ง (sender) และรายละเอียดโพสต์
+// GET /notifications/:uid  --> ดึงแจ้งเตือนของ user id นี้ พร้อมข้อมูลผู้ส่ง (sender) และรายละเอียดโพสต์
 router.get('/notifications/:uid', (req, res) => {
   const receiver_uid = req.params.uid;
 
@@ -411,24 +411,119 @@ router.get('/notifications/:uid', (req, res) => {
       n.is_read,
       n.created_at,
       u.name AS sender_name,
-      u.profile_image AS sender_profile_image
+      u.profile_image AS sender_profile_image,
+      p.post_topic,
+      p.post_description,
+      p.post_date,
+      p.post_fk_uid,
+      p.amount_of_save,
+      p.amount_of_comment
     FROM notifications n
     LEFT JOIN user u ON n.sender_uid = u.uid
+    LEFT JOIN post p ON n.post_id = p.post_id
     WHERE n.receiver_uid = ?
     ORDER BY n.created_at DESC
   `;
 
-  conn.query(sql, [receiver_uid], (err, results) => {
+  conn.query(sql, [receiver_uid], (err, notificationResults) => {
     if (err) {
       console.error('[Get Notifications] DB error:', err);
       return res.status(500).json({ error: 'Database error' });
     }
 
-    return res.status(200).json({
-      notifications: results,
+    // ถ้าไม่มี notification ส่งกลับเลย
+    if (notificationResults.length === 0) {
+      return res.status(200).json({
+        notifications: [],
+      });
+    }
+
+    // ดึงรูปภาพของโพสต์ที่เกี่ยวข้องกับ notifications
+    const postIds = notificationResults
+      .map(notification => notification.post_id)
+      .filter(post_id => post_id !== null && post_id !== undefined);
+
+    if (postIds.length === 0) {
+      // ถ้าไม่มี post_id ในการแจ้งเตือน ส่งข้อมูลโดยไม่มีรูปภาพ
+      const formattedNotifications = notificationResults.map(notification => ({
+        notification_id: notification.notification_id,
+        sender_uid: notification.sender_uid,
+        receiver_uid: notification.receiver_uid,
+        post_id: notification.post_id,
+        type: notification.type,
+        message: notification.message,
+        is_read: notification.is_read,
+        created_at: notification.created_at,
+        sender: {
+          name: notification.sender_name,
+          profile_image: notification.sender_profile_image
+        },
+        post: notification.post_id ? {
+          post_id: notification.post_id,
+          post_topic: notification.post_topic,
+          post_description: notification.post_description,
+          post_date: notification.post_date,
+          post_fk_uid: notification.post_fk_uid,
+          amount_of_save: notification.amount_of_save,
+          amount_of_comment: notification.amount_of_comment,
+          images: []
+        } : null
+      }));
+
+      return res.status(200).json({
+        notifications: formattedNotifications,
+      });
+    }
+
+    // ดึงรูปภาพของโพสต์
+    const imageSql = `
+      SELECT * FROM image_post 
+      WHERE image_fk_postid IN (${postIds.map(() => '?').join(',')})
+    `;
+
+    conn.query(imageSql, postIds, (err, imageResults) => {
+      if (err) {
+        console.error('[Get Notifications Images] DB error:', err);
+        return res.status(500).json({ error: 'Image query error' });
+      }
+
+      // รวมข้อมูล notification พร้อมกับข้อมูลโพสต์และรูปภาพ
+      const formattedNotifications = notificationResults.map(notification => {
+        const postImages = imageResults.filter(img => 
+          img.image_fk_postid === notification.post_id
+        );
+
+        return {
+          notification_id: notification.notification_id,
+          sender_uid: notification.sender_uid,
+          receiver_uid: notification.receiver_uid,
+          post_id: notification.post_id,
+          type: notification.type,
+          message: notification.message,
+          is_read: notification.is_read,
+          created_at: notification.created_at,
+          sender: {
+            name: notification.sender_name,
+            profile_image: notification.sender_profile_image
+          },
+          post: notification.post_id ? {
+            post_id: notification.post_id,
+            post_topic: notification.post_topic,
+            post_description: notification.post_description,
+            post_date: notification.post_date,
+            post_fk_uid: notification.post_fk_uid,
+            amount_of_save: notification.amount_of_save,
+            amount_of_comment: notification.amount_of_comment,
+            images: postImages
+          } : null
+        };
+      });
+
+      return res.status(200).json({
+        notifications: formattedNotifications,
+      });
     });
   });
 });
-
 
 
