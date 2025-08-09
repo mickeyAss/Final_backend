@@ -170,12 +170,42 @@ router.post('/like', (req, res) => {
           console.log('[Like] Post update failed:', err3);
           return res.status(500).json({ error: 'Post update failed' });
         }
-        console.log(`[Like] User ${user_id} liked post ${post_id} successfully`);
-        res.status(200).json({ message: 'Liked' });
+
+        // หาว่าเจ้าของโพสต์เป็นใคร
+        const ownerSql = 'SELECT post_fk_uid FROM post WHERE post_id = ?';
+        conn.query(ownerSql, [post_id], (err4, ownerResult) => {
+          if (err4) {
+            console.log('[Like] Get post owner failed:', err4);
+            return res.status(500).json({ error: 'Get post owner failed' });
+          }
+
+          if (ownerResult.length > 0) {
+            const receiver_uid = ownerResult[0].post_fk_uid;
+
+            // ไม่ต้องแจ้งเตือนถ้าเจ้าของโพสต์กดไลก์โพสต์ตัวเอง
+            if (receiver_uid !== user_id) {
+              const notifSql = `
+                INSERT INTO notifications (sender_uid, receiver_uid, post_id, type, message)
+                VALUES (?, ?, ?, 'like', ?)
+              `;
+              const message = 'ได้กดถูกใจโพสต์ของคุณ';
+              conn.query(notifSql, [user_id, receiver_uid, post_id, message], (err5) => {
+                if (err5) {
+                  console.log('[Like] Notification insert failed:', err5);
+                  // ไม่ return error เพราะไม่อยากให้การกดไลก์พัง
+                }
+              });
+            }
+          }
+
+          console.log(`[Like] User ${user_id} liked post ${post_id} successfully`);
+          res.status(200).json({ message: 'Liked' });
+        });
       });
     });
   });
 });
+
 
 
 // --------------------------------------------
@@ -1063,7 +1093,6 @@ router.get('/following-posts/:user_id', (req, res) => {
     return res.status(500).json({ error: 'Server error' });
   }
 });
-
 
 
 

@@ -288,9 +288,25 @@ router.post("/follow", (req, res) => {
       return res.status(200).json({ message: "ติดตามซ้ำหรือข้อมูลมีอยู่แล้ว" });
     }
 
+    // ถ้าเพิ่มติดตามสำเร็จ ให้บันทึกแจ้งเตือน (ถ้าไม่ใช่ติดตามตัวเอง)
+    if (follower_id !== following_id) {
+      const notifSql = `
+        INSERT INTO notifications (sender_uid, receiver_uid, type, message)
+        VALUES (?, ?, 'follow', ?)
+      `;
+      const message = 'ได้ติดตามคุณ';
+      conn.query(notifSql, [follower_id, following_id, message], (err2) => {
+        if (err2) {
+          console.error('[Follow] Notification insert failed:', err2);
+          // ไม่ return error เพราะไม่อยากให้การติดตามล้มเหลวเพราะแจ้งเตือน
+        }
+      });
+    }
+
     return res.status(200).json({ message: "ติดตามสำเร็จ" });
   });
 });
+
 
 
 // DELETE /unfollow
