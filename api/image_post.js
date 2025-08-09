@@ -130,6 +130,17 @@ router.get("/get", (req, res) => {
 });
 
 
+const admin = require('firebase-admin');
+// ต้องตั้งค่า Firebase Admin SDK ก่อน (โหลด service account json)
+const serviceAccount = require('../final-project-2f65c-firebase-adminsdk-fbsvc-b7cc350036.json');
+
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    databaseURL: "https://final-project-2f65c-default-rtdb.firebaseio.com"  // แก้เป็น URL ของ Firebase Realtime Database คุณ
+  });
+}
+
 // --------------------------------------------
 // API POST /like
 // เพิ่มไลก์ของผู้ใช้ให้โพสต์
@@ -195,6 +206,27 @@ router.post('/like', (req, res) => {
                   // ไม่ return error เพราะไม่อยากให้การกดไลก์พัง
                 }
               });
+
+              // เพิ่ม notification ลง Firebase Realtime Database
+              const notifData = {
+                sender_uid: user_id,
+                receiver_uid: receiver_uid,
+                post_id: post_id,
+                type: 'like',
+                message: message,
+                is_read: false,
+                created_at: admin.database.ServerValue.TIMESTAMP
+              };
+
+              const db = admin.database();
+              const notifRef = db.ref('notifications').push(); // สร้าง id อัตโนมัติ
+              notifRef.set(notifData)
+                .then(() => {
+                  console.log('[Like] Notification added to Firebase');
+                })
+                .catch((firebaseErr) => {
+                  console.log('[Like] Firebase notification insert failed:', firebaseErr);
+                });
             }
           }
 

@@ -392,6 +392,7 @@ router.get("/following-count/:uid", (req, res) => {
 });
 
 // GET /notifications/:uid  --> ดึงแจ้งเตือนของ user id นี้
+// GET /notifications/:uid  --> ดึงแจ้งเตือนของ user id นี้ พร้อมข้อมูลผู้ส่ง (sender)
 router.get('/notifications/:uid', (req, res) => {
   const receiver_uid = req.params.uid;
 
@@ -400,10 +401,21 @@ router.get('/notifications/:uid', (req, res) => {
   }
 
   const sql = `
-    SELECT notification_id, sender_uid, receiver_uid, post_id, type, message, is_read, created_at
-    FROM notifications
-    WHERE receiver_uid = ?
-    ORDER BY created_at DESC
+    SELECT
+      n.notification_id,
+      n.sender_uid,
+      n.receiver_uid,
+      n.post_id,
+      n.type,
+      n.message,
+      n.is_read,
+      n.created_at,
+      u.name AS sender_name,
+      u.profile_image AS sender_profile_image
+    FROM notifications n
+    LEFT JOIN user u ON n.sender_uid = u.uid
+    WHERE n.receiver_uid = ?
+    ORDER BY n.created_at DESC
   `;
 
   conn.query(sql, [receiver_uid], (err, results) => {
@@ -418,28 +430,5 @@ router.get('/notifications/:uid', (req, res) => {
   });
 });
 
-// GET /notifications/unread-count/:uid
-router.get('/notifications/unread-count/:uid', (req, res) => {
-  const receiver_uid = req.params.uid;
 
-  if (!receiver_uid) {
-    return res.status(400).json({ error: 'receiver_uid is required' });
-  }
-
-  const sql = `
-    SELECT COUNT(*) AS unreadCount
-    FROM notifications
-    WHERE receiver_uid = ? AND (is_read = 0 OR is_read IS NULL)
-  `;
-
-  conn.query(sql, [receiver_uid], (err, results) => {
-    if (err) {
-      console.error('[Unread Count] DB error:', err);
-      return res.status(500).json({ error: 'Database error' });
-    }
-
-    const count = results[0]?.unreadCount || 0;
-    return res.status(200).json({ unreadCount: count });
-  });
-});
 
