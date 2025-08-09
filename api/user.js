@@ -264,11 +264,21 @@ router.get("/get/:uid", (req, res) => {
   }
 });
 
+// ต้องอยู่บนสุดไฟล์ API
+const admin = require('firebase-admin');
+const serviceAccount = require('../final-project-2f65c-firebase-adminsdk-fbsvc-b7cc350036.json');
+
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    databaseURL: "https://final-project-2f65c-default-rtdb.firebaseio.com"
+  });
+}
+
 // POST /follow
 router.post("/follow", (req, res) => {
   const { follower_id, following_id } = req.body;
 
-  // ป้องกันไม่ให้ติดตามตัวเอง
   if (!follower_id || !following_id || follower_id == following_id) {
     return res.status(400).json({ error: "ข้อมูลไม่ถูกต้อง" });
   }
@@ -288,7 +298,7 @@ router.post("/follow", (req, res) => {
       return res.status(200).json({ message: "ติดตามซ้ำหรือข้อมูลมีอยู่แล้ว" });
     }
 
-    // ถ้าเพิ่มติดตามสำเร็จ ให้บันทึกแจ้งเตือน (ถ้าไม่ใช่ติดตามตัวเอง)
+    // บันทึกแจ้งเตือนลง MySQL
     if (follower_id !== following_id) {
       const notifSql = `
         INSERT INTO notifications (sender_uid, receiver_uid, type, message)
@@ -298,15 +308,27 @@ router.post("/follow", (req, res) => {
       conn.query(notifSql, [follower_id, following_id, message], (err2) => {
         if (err2) {
           console.error('[Follow] Notification insert failed:', err2);
-          // ไม่ return error เพราะไม่อยากให้การติดตามล้มเหลวเพราะแจ้งเตือน
         }
+      });
+
+      // ✅ บันทึกแจ้งเตือนลง Firebase Firestore
+      admin.firestore().collection('notifications').add({
+        sender_uid: follower_id,
+        receiver_uid: following_id,
+        type: 'follow',
+        message: 'ได้ติดตามคุณ',
+        read: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+      }).then(() => {
+        console.log('Firebase notification created');
+      }).catch(err3 => {
+        console.error('Error writing to Firebase:', err3);
       });
     }
 
     return res.status(200).json({ message: "ติดตามสำเร็จ" });
   });
 });
-
 
 
 // DELETE /unfollow
