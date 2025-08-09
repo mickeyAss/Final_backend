@@ -391,3 +391,30 @@ router.get("/following-count/:uid", (req, res) => {
   });
 });
 
+// GET /notifications/:uid  --> ดึงแจ้งเตือนของ user id นี้
+router.get('/notifications/:uid', (req, res) => {
+  const receiver_uid = req.params.uid;
+
+  if (!receiver_uid) {
+    return res.status(400).json({ error: 'receiver_uid is required' });
+  }
+
+  const sql = `
+    SELECT notification_id, sender_uid, receiver_uid, post_id, type, message, is_read, created_at
+    FROM notifications
+    WHERE receiver_uid = ?
+    ORDER BY created_at DESC
+  `;
+
+  conn.query(sql, [receiver_uid], (err, results) => {
+    if (err) {
+      console.error('[Get Notifications] DB error:', err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    return res.status(200).json({
+      notifications: results,
+    });
+  });
+});
+
