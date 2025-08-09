@@ -279,54 +279,75 @@ if (!admin.apps.length) {
 router.post("/follow", (req, res) => {
   const { follower_id, following_id } = req.body;
 
-  if (!follower_id || !following_id || follower_id == following_id) {
-    return res.status(400).json({ error: "ข้อมูลไม่ถูกต้อง" });
+  if (!follower_id || !following_id) {
+    console.log('[Follow] Missing follower_id or following_id');
+    return res.status(400).json({ error: "follower_id and following_id are required" });
   }
 
-  const sql = `
-    INSERT IGNORE INTO user_followers (follower_id, following_id)
-    VALUES (?, ?)
-  `;
+  if (follower_id == following_id) {
+    console.log('[Follow] Cannot follow yourself');
+    return res.status(400).json({ error: "Cannot follow yourself" });
+  }
 
-  conn.query(sql, [follower_id, following_id], (err, result) => {
+  // เช็คว่าติดตามแล้วหรือยัง
+  const checkSql = 'SELECT * FROM user_followers WHERE follower_id = ? AND following_id = ?';
+  conn.query(checkSql, [follower_id, following_id], (err, results) => {
     if (err) {
-      console.error(err);
-      return res.status(500).json({ error: "เกิดข้อผิดพลาดระหว่างการติดตาม" });
+      console.log('[Follow] Check failed:', err);
+      return res.status(500).json({ error: 'Check failed' });
     }
 
-    if (result.affectedRows === 0) {
-      return res.status(200).json({ message: "ติดตามซ้ำหรือข้อมูลมีอยู่แล้ว" });
+    if (results.length > 0) {
+      console.log(`[Follow] User ${follower_id} already follows ${following_id}`);
+      return res.status(400).json({ error: 'Already followed' });
     }
 
-    // บันทึกแจ้งเตือนลง MySQL
-    if (follower_id !== following_id) {
-      const notifSql = `
-        INSERT INTO notifications (sender_uid, receiver_uid, type, message)
-        VALUES (?, ?, 'follow', ?)
-      `;
-      const message = 'ได้ติดตามคุณ';
-      conn.query(notifSql, [follower_id, following_id, message], (err2) => {
-        if (err2) {
-          console.error('[Follow] Notification insert failed:', err2);
-        }
-      });
+    // บันทึกการติดตาม
+    const insertSql = 'INSERT INTO user_followers (follower_id, following_id) VALUES (?, ?)';
+    conn.query(insertSql, [follower_id, following_id], (err2) => {
+      if (err2) {
+        console.log('[Follow] Follow insert failed:', err2);
+        return res.status(500).json({ error: 'Follow insert failed' });
+      }
 
-      // ✅ บันทึกแจ้งเตือนลง Firebase Firestore
-      admin.firestore().collection('notifications').add({
-        sender_uid: follower_id,
-        receiver_uid: following_id,
-        type: 'follow',
-        message: 'ได้ติดตามคุณ',
-        read: false,
-        createdAt: admin.firestore.FieldValue.serverTimestamp()
-      }).then(() => {
-        console.log('Firebase notification created');
-      }).catch(err3 => {
-        console.error('Error writing to Firebase:', err3);
-      });
-    }
+      // ไม่ต้องแจ้งเตือนถ้าติดตามตัวเอง (กันไว้รอบสอง)
+      if (following_id !== follower_id) {
+        const notifSql = `
+          INSERT INTO notifications (sender_uid, receiver_uid, type, message)
+          VALUES (?, ?, 'follow', ?)
+        `;
+        const message = 'ได้ติดตามคุณ';
+        conn.query(notifSql, [follower_id, following_id, message], (err3) => {
+          if (err3) {
+            console.log('[Follow] Notification insert failed:', err3);
+            // ไม่ return error เพราะไม่อยากให้การติดตามพัง
+          }
+        });
 
-    return res.status(200).json({ message: "ติดตามสำเร็จ" });
+        // เพิ่ม notification ลง Firebase Realtime Database
+        const notifData = {
+          sender_uid: follower_id,
+          receiver_uid: following_id,
+          type: 'follow',
+          message: message,
+          is_read: false,
+          created_at: admin.database.ServerValue.TIMESTAMP
+        };
+
+        const db = admin.database();
+        const notifRef = db.ref('notifications').push(); // สร้าง id อัตโนมัติ
+        notifRef.set(notifData)
+          .then(() => {
+            console.log('[Follow] Notification added to Firebase');
+          })
+          .catch((firebaseErr) => {
+            console.log('[Follow] Firebase notification insert failed:', firebaseErr);
+          });
+      }
+
+      console.log(`[Follow] User ${follower_id} followed ${following_id} successfully`);
+      res.status(200).json({ message: 'Followed' });
+    });
   });
 });
 
