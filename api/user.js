@@ -418,3 +418,28 @@ router.get('/notifications/:uid', (req, res) => {
   });
 });
 
+// GET /notifications/unread-count/:uid
+router.get('/notifications/unread-count/:uid', (req, res) => {
+  const receiver_uid = req.params.uid;
+
+  if (!receiver_uid) {
+    return res.status(400).json({ error: 'receiver_uid is required' });
+  }
+
+  const sql = `
+    SELECT COUNT(*) AS unreadCount
+    FROM notifications
+    WHERE receiver_uid = ? AND (is_read = 0 OR is_read IS NULL)
+  `;
+
+  conn.query(sql, [receiver_uid], (err, results) => {
+    if (err) {
+      console.error('[Unread Count] DB error:', err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    const count = results[0]?.unreadCount || 0;
+    return res.status(200).json({ unreadCount: count });
+  });
+});
+
