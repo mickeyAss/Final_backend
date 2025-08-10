@@ -435,7 +435,6 @@ router.get("/following-count/:uid", (req, res) => {
 });
 
 // GET /notifications/:uid  --> ดึงแจ้งเตือนของ user id นี้ พร้อมข้อมูลผู้ส่ง (sender) และรายละเอียดโพสต์
-// GET /notifications/:uid  --> ดึงแจ้งเตือนของ user id นี้ พร้อมข้อมูลผู้ส่ง (sender) และรายละเอียดโพสต์
 router.get('/notifications/:uid', (req, res) => {
   const receiver_uid = req.params.uid;
 
@@ -453,6 +452,7 @@ router.get('/notifications/:uid', (req, res) => {
       n.message,
       n.is_read,
       n.created_at,
+      u.uid AS sender_uid_value,         -- ✅ เพิ่มเพื่อส่ง uid ของ sender
       u.name AS sender_name,
       u.profile_image AS sender_profile_image,
       p.post_topic,
@@ -474,20 +474,17 @@ router.get('/notifications/:uid', (req, res) => {
       return res.status(500).json({ error: 'Database error' });
     }
 
-    // ถ้าไม่มี notification ส่งกลับเลย
     if (notificationResults.length === 0) {
       return res.status(200).json({
         notifications: [],
       });
     }
 
-    // ดึงรูปภาพของโพสต์ที่เกี่ยวข้องกับ notifications
     const postIds = notificationResults
       .map(notification => notification.post_id)
       .filter(post_id => post_id !== null && post_id !== undefined);
 
     if (postIds.length === 0) {
-      // ถ้าไม่มี post_id ในการแจ้งเตือน ส่งข้อมูลโดยไม่มีรูปภาพ
       const formattedNotifications = notificationResults.map(notification => ({
         notification_id: notification.notification_id,
         sender_uid: notification.sender_uid,
@@ -498,6 +495,7 @@ router.get('/notifications/:uid', (req, res) => {
         is_read: notification.is_read,
         created_at: notification.created_at,
         sender: {
+          uid: notification.sender_uid_value, // ✅ ส่ง uid กลับไป
           name: notification.sender_name,
           profile_image: notification.sender_profile_image
         },
@@ -518,7 +516,6 @@ router.get('/notifications/:uid', (req, res) => {
       });
     }
 
-    // ดึงรูปภาพของโพสต์
     const imageSql = `
       SELECT * FROM image_post 
       WHERE image_fk_postid IN (${postIds.map(() => '?').join(',')})
@@ -530,7 +527,6 @@ router.get('/notifications/:uid', (req, res) => {
         return res.status(500).json({ error: 'Image query error' });
       }
 
-      // รวมข้อมูล notification พร้อมกับข้อมูลโพสต์และรูปภาพ
       const formattedNotifications = notificationResults.map(notification => {
         const postImages = imageResults.filter(img => 
           img.image_fk_postid === notification.post_id
@@ -546,6 +542,7 @@ router.get('/notifications/:uid', (req, res) => {
           is_read: notification.is_read,
           created_at: notification.created_at,
           sender: {
+            uid: notification.sender_uid_value, // ✅ ส่ง uid กลับไป
             name: notification.sender_name,
             profile_image: notification.sender_profile_image
           },
@@ -568,5 +565,6 @@ router.get('/notifications/:uid', (req, res) => {
     });
   });
 });
+
 
 
