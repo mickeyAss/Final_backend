@@ -5,155 +5,127 @@ var conn = require('../dbconnect')
 
 module.exports = router;
 
+// --------------------------------------------
+// API GET /get
+// ดึงโพสต์ทั้งหมด พร้อมข้อมูลผู้ใช้ รูปภาพ หมวดหมู่ แฮชแท็ก และจำนวนไลก์
+// --------------------------------------------
 router.get("/get", (req, res) => {
   try {
-    const currentUid = req.query.uid;
-    if (!currentUid) {
-      return res.status(400).json({ error: "uid is required" });
-    }
-
-    const currentUserSql = `
-      SELECT height, weight, shirt_size, chest, waist_circumference, hip
-      FROM user
-      WHERE uid = ?
+    const postSql = `
+      SELECT 
+        post.*, 
+        user.uid, user.name, user.email, user.height, user.weight, 
+        user.shirt_size, user.chest, user.waist_circumference, 
+        user.hip, user.personal_description, user.profile_image
+      FROM post
+      JOIN user ON post.post_fk_uid = user.uid
+      ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC
     `;
-    conn.query(currentUserSql, [currentUid], (err, userResult) => {
-      if (err) return res.status(400).json({ error: "User query error" });
-      if (userResult.length === 0)
-        return res.status(404).json({ error: "User not found" });
 
-      const cur = userResult[0];
+    conn.query(postSql, (err, postResults) => {
+      if (err) return res.status(400).json({ error: 'Post query error' });
 
-      // ดึงโพสต์ทั้งหมดพร้อมคำนวณ similarity score
-      const postSql = `
-        SELECT 
-          post.*, 
-          user.uid, user.name, user.email, user.height, user.weight, 
-          user.shirt_size, user.chest, user.waist_circumference, 
-          user.hip, user.personal_description, user.profile_image,
-          (
-            ABS(user.height - ?) +
-            ABS(user.weight - ?) +
-            ABS(user.chest - ?) +
-            ABS(user.waist_circumference - ?) +
-            ABS(user.hip - ?)
-          ) AS similarity_score
-        FROM post
-        JOIN user ON post.post_fk_uid = user.uid
-        WHERE user.uid != ?
-        ORDER BY similarity_score ASC, DATE(post.post_date) DESC
-      `;
+      if (postResults.length === 0)
+        return res.status(404).json({ error: 'No posts found' });
 
-      conn.query(
-        postSql,
-        [
-          cur.height || 0,
-          cur.weight || 0,
-          cur.chest || 0,
-          cur.waist_circumference || 0,
-          cur.hip || 0,
-          currentUid,
-        ],
-        (err, postResults) => {
-          if (err) return res.status(400).json({ error: "Post query error" });
-          if (postResults.length === 0)
-            return res.status(404).json({ error: "No posts found" });
+      // ดึงรูปภาพทั้งหมดจากตาราง image_post
+      const imageSql = `SELECT * FROM image_post`;
+      conn.query(imageSql, (err, imageResults) => {
+        if (err) return res.status(400).json({ error: 'Image query error' });
 
-          // ---- ดึงข้อมูลอื่น ๆ เหมือนเดิม ----
-          const imageSql = `SELECT * FROM image_post`;
-          conn.query(imageSql, (err, imageResults) => {
-            if (err) return res.status(400).json({ error: 'Image query error' });
+        // ดึงหมวดหมู่ของโพสต์จากตาราง post_category และ category
+        const categorySql = `
+          SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
+          FROM post_category pc
+          JOIN category c ON pc.category_id_fk = c.cid
+        `;
+        conn.query(categorySql, (err, categoryResults) => {
+          if (err) return res.status(400).json({ error: 'Category query error' });
 
-            const categorySql = `
-              SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
-              FROM post_category pc
-              JOIN category c ON pc.category_id_fk = c.cid
+          // ดึงแฮชแท็กของโพสต์จาก post_hashtags และ hashtags
+          const hashtagSql = `
+            SELECT ph.post_id_fk, h.tag_id, h.tag_name 
+            FROM post_hashtags ph
+            JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
+          `;
+          conn.query(hashtagSql, (err, hashtagResults) => {
+            if (err) return res.status(400).json({ error: 'Hashtag query error' });
+
+            // ดึงจำนวนไลก์แต่ละโพสต์จากตาราง post_likes
+            const likeSql = `
+              SELECT post_id_fk AS post_id, COUNT(*) AS like_count 
+              FROM post_likes 
+              GROUP BY post_id_fk
             `;
-            conn.query(categorySql, (err, categoryResults) => {
-              if (err) return res.status(400).json({ error: 'Category query error' });
+            conn.query(likeSql, (err, likeResults) => {
+              if (err) return res.status(400).json({ error: 'Like count query error' });
 
-              const hashtagSql = `
-                SELECT ph.post_id_fk, h.tag_id, h.tag_name 
-                FROM post_hashtags ph
-                JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
-              `;
-              conn.query(hashtagSql, (err, hashtagResults) => {
-                if (err) return res.status(400).json({ error: 'Hashtag query error' });
-
-                const likeSql = `
-                  SELECT post_id_fk AS post_id, COUNT(*) AS like_count 
-                  FROM post_likes 
-                  GROUP BY post_id_fk
-                `;
-                conn.query(likeSql, (err, likeResults) => {
-                  if (err) return res.status(400).json({ error: 'Like count query error' });
-
-                  const likeMap = {};
-                  likeResults.forEach(item => {
-                    likeMap[item.post_id] = item.like_count;
-                  });
-
-                  const postsWithData = postResults.map(post => {
-                    const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
-                    const categories = categoryResults
-                      .filter(cat => cat.post_id_fk === post.post_id)
-                      .map(cat => ({
-                        cid: cat.cid,
-                        cname: cat.cname,
-                        cimage: cat.cimage,
-                        ctype: cat.ctype
-                      }));
-
-                    const hashtags = hashtagResults
-                      .filter(ht => ht.post_id_fk === post.post_id)
-                      .map(ht => ({
-                        tag_id: ht.tag_id,
-                        tag_name: ht.tag_name
-                      }));
-
-                    return {
-                      post: {
-                        post_id: post.post_id,
-                        post_topic: post.post_topic,
-                        post_description: post.post_description,
-                        post_date: post.post_date,
-                        post_fk_cid: post.post_fk_cid,
-                        post_fk_uid: post.post_fk_uid,
-                        amount_of_like: likeMap[post.post_id] || 0,
-                        amount_of_save: post.amount_of_save,
-                        amount_of_comment: post.amount_of_comment,
-                        similarity_score: post.similarity_score
-                      },
-                      user: {
-                        uid: post.uid,
-                        name: post.name,
-                        email: post.email,
-                        height: post.height,
-                        weight: post.weight,
-                        shirt_size: post.shirt_size,
-                        chest: post.chest,
-                        waist_circumference: post.waist_circumference,
-                        hip: post.hip,
-                        personal_description: post.personal_description,
-                        profile_image: post.profile_image
-                      },
-                      images,
-                      categories,
-                      hashtags
-                    };
-                  });
-
-                  res.status(200).json(postsWithData);
-                });
+              // สร้างแผนที่จำนวนไลก์สำหรับแต่ละโพสต์
+              const likeMap = {};
+              likeResults.forEach(item => {
+                likeMap[item.post_id] = item.like_count;
               });
+
+              // รวมข้อมูลโพสต์, ผู้ใช้, รูปภาพ, หมวดหมู่, แฮชแท็ก, และจำนวนไลก์
+              const postsWithData = postResults.map(post => {
+                const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
+                const categories = categoryResults
+                  .filter(cat => cat.post_id_fk === post.post_id)
+                  .map(cat => ({
+                    cid: cat.cid,
+                    cname: cat.cname,
+                    cimage: cat.cimage,
+                    ctype: cat.ctype
+                  }));
+
+                const hashtags = hashtagResults
+                  .filter(ht => ht.post_id_fk === post.post_id)
+                  .map(ht => ({
+                    tag_id: ht.tag_id,
+                    tag_name: ht.tag_name
+                  }));
+
+                return {
+                  post: {
+                    post_id: post.post_id,
+                    post_topic: post.post_topic,
+                    post_description: post.post_description,
+                    post_date: post.post_date,
+                    post_fk_cid: post.post_fk_cid,
+                    post_fk_uid: post.post_fk_uid,
+                    amount_of_like: likeMap[post.post_id] || 0, // จำนวนไลก์
+                    amount_of_save: post.amount_of_save,
+                    amount_of_comment: post.amount_of_comment,
+                  },
+                  user: {
+                    uid: post.uid,
+                    name: post.name,
+                    email: post.email,
+                    height: post.height,
+                    weight: post.weight,
+                    shirt_size: post.shirt_size,
+                    chest: post.chest,
+                    waist_circumference: post.waist_circumference,
+                    hip: post.hip,
+                    personal_description: post.personal_description,
+                    profile_image: post.profile_image
+                  },
+                  images,
+                  categories,
+                  hashtags
+                };
+              });
+
+              // ส่งข้อมูลโพสต์ทั้งหมดกลับไป
+              res.status(200).json(postsWithData);
             });
           });
-        }
-      );
+        });
+      });
     });
   } catch (err) {
     console.log(err);
-    return res.status(500).json({ error: "Server error" });
+    return res.status(500).json({ error: 'Server error' });
   }
 });
 
