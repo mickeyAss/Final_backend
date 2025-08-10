@@ -1244,6 +1244,40 @@ router.get('/following-posts/:user_id', (req, res) => {
   }
 });
 
+// PUT หรือ PATCH สำหรับอัพเดตสถานะอ่าน notification
+// API อัปเดต is_read ของ notification
+router.put('/notification/read/:notification_id', (req, res) => {
+  const notificationId = req.params.notification_id;
+  const userId = req.body.userId; // userId ของผู้รับ notification (จำเป็นสำหรับ Firebase path)
+
+  if (!notificationId || !userId) {
+    return res.status(400).json({ error: 'notification_id and userId are required' });
+  }
+
+  // อัปเดตสถานะ is_read ใน MySQL
+  const sql = 'UPDATE notifications SET is_read = 1 WHERE notification_id = ?';
+  conn.query(sql, [notificationId], (err, result) => {
+    if (err) {
+      console.error('MySQL update error:', err);
+      return res.status(500).json({ error: 'Database update error' });
+    }
+
+    // อัปเดตสถานะ is_read ใน Firebase Realtime Database
+    const db = admin.database();
+    const ref = db.ref(`notifications/${userId}/${notificationId}`);
+
+    ref.update({ is_read: 1 })
+      .then(() => {
+        res.json({ message: 'Notification marked as read in MySQL and Firebase' });
+      })
+      .catch((firebaseError) => {
+        console.error('Firebase update error:', firebaseError);
+        res.status(500).json({ error: 'Firebase update error' });
+      });
+  });
+});
+
+
 
 
 
