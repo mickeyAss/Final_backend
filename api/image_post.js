@@ -622,6 +622,123 @@ router.get("/by-user/:uid", (req, res) => {
   });
 });
 
+router.get("/by-post/:post_id", (req, res) => {
+  const { post_id } = req.params;
+
+  if (!post_id) {
+    return res.status(400).json({ error: "Missing post_id in path" });
+  }
+
+  try {
+    // ดึงโพสต์พร้อมข้อมูล user (join user)
+    const postSql = `
+      SELECT 
+        post.*, 
+        user.uid, user.name, user.email, user.height, user.weight, 
+        user.shirt_size, user.chest, user.waist_circumference, 
+        user.hip, user.personal_description, user.profile_image
+      FROM post
+      JOIN user ON post.post_fk_uid = user.uid
+      WHERE post.post_id = ?
+    `;
+
+    conn.query(postSql, [post_id], (err, postResults) => {
+      if (err) return res.status(400).json({ error: 'Post query error' });
+
+      if (postResults.length === 0)
+        return res.status(404).json({ error: 'Post not found' });
+
+      const post = postResults[0];
+
+      // ดึงรูปภาพทั้งหมดที่เกี่ยวข้องกับโพสต์นี้
+      const imageSql = `SELECT * FROM image_post WHERE image_fk_postid = ?`;
+      conn.query(imageSql, [post_id], (err, imageResults) => {
+        if (err) return res.status(400).json({ error: 'Image query error' });
+
+        // ดึงหมวดหมู่ของโพสต์นี้
+        const categorySql = `
+          SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
+          FROM post_category pc
+          JOIN category c ON pc.category_id_fk = c.cid
+          WHERE pc.post_id_fk = ?
+        `;
+        conn.query(categorySql, [post_id], (err, categoryResults) => {
+          if (err) return res.status(400).json({ error: 'Category query error' });
+
+          // ดึงแฮชแท็กของโพสต์นี้
+          const hashtagSql = `
+            SELECT ph.post_id_fk, h.tag_id, h.tag_name 
+            FROM post_hashtags ph
+            JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
+            WHERE ph.post_id_fk = ?
+          `;
+          conn.query(hashtagSql, [post_id], (err, hashtagResults) => {
+            if (err) return res.status(400).json({ error: 'Hashtag query error' });
+
+            // ดึงจำนวนไลก์โพสต์นี้
+            const likeSql = `
+              SELECT COUNT(*) AS like_count 
+              FROM post_likes 
+              WHERE post_id_fk = ?
+            `;
+            conn.query(likeSql, [post_id], (err, likeResults) => {
+              if (err) return res.status(400).json({ error: 'Like count query error' });
+
+              const likeCount = likeResults[0]?.like_count || 0;
+
+              // สร้าง response object
+              const postWithDetails = {
+                post: {
+                  post_id: post.post_id,
+                  post_topic: post.post_topic,
+                  post_description: post.post_description,
+                  post_date: post.post_date,
+                  post_fk_cid: post.post_fk_cid,
+                  post_fk_uid: post.post_fk_uid,
+                  amount_of_like: likeCount,
+                  amount_of_save: post.amount_of_save,
+                  amount_of_comment: post.amount_of_comment,
+                },
+                user: {
+                  uid: post.uid,
+                  name: post.name,
+                  email: post.email,
+                  height: post.height,
+                  weight: post.weight,
+                  shirt_size: post.shirt_size,
+                  chest: post.chest,
+                  waist_circumference: post.waist_circumference,
+                  hip: post.hip,
+                  personal_description: post.personal_description,
+                  profile_image: post.profile_image
+                },
+                images: imageResults,
+                categories: categoryResults.map(cat => ({
+                  cid: cat.cid,
+                  cname: cat.cname,
+                  cimage: cat.cimage,
+                  ctype: cat.ctype
+                })),
+                hashtags: hashtagResults.map(ht => ({
+                  tag_id: ht.tag_id,
+                  tag_name: ht.tag_name
+                }))
+              };
+
+              res.status(200).json(postWithDetails);
+            });
+          });
+        });
+      });
+    });
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
+
 // API ดึงโพสต์ทั้งหมดที่มี category cid ตรงกับ param cid
 router.get('/by-category/:cid', (req, res) => {
   const { cid } = req.params;
