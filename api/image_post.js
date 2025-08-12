@@ -617,7 +617,6 @@ router.get("/by-post/:post_id", (req, res) => {
     return res.status(400).json({ error: "Missing post_id in path" });
   }
 
-  // แปลงเป็นเลขจำนวนเต็ม
   post_id = parseInt(post_id, 10);
   if (isNaN(post_id)) {
     return res.status(400).json({ error: "Invalid post_id" });
@@ -627,9 +626,8 @@ router.get("/by-post/:post_id", (req, res) => {
     const postSql = `
       SELECT 
         post.*, 
-        user.uid, user.name, user.email, user.height, user.weight, 
-        user.shirt_size, user.chest, user.waist_circumference, 
-        user.hip, user.personal_description, user.profile_image
+        user.uid, user.name, user.email, 
+        user.personal_description, user.profile_image
       FROM post
       JOIN user ON post.post_fk_uid = user.uid
       WHERE post.post_id = ?
@@ -691,12 +689,6 @@ router.get("/by-post/:post_id", (req, res) => {
                   uid: post.uid,
                   name: post.name,
                   email: post.email,
-                  height: post.height,
-                  weight: post.weight,
-                  shirt_size: post.shirt_size,
-                  chest: post.chest,
-                  waist_circumference: post.waist_circumference,
-                  hip: post.hip,
                   personal_description: post.personal_description,
                   profile_image: post.profile_image,
                 },
@@ -724,6 +716,7 @@ router.get("/by-post/:post_id", (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 });
+
 
 
 
