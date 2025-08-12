@@ -157,18 +157,18 @@ router.post("/login", async (req, res) => {
 router.post("/register", async (req, res) => {
   const {
     name, email, password,
-    height, weight, shirt_size,
-    chest, waist_circumference, hip,
     personal_description,
-    category_ids // สมมติรับมาจาก request body เป็น array เช่น [1, 2, 3]
+    category_ids // รับมาจาก body เป็น array เช่น [1, 2, 3]
   } = req.body;
 
   const defaultProfileImage = 'https://firebasestorage.googleapis.com/v0/b/final-project-2f65c.firebasestorage.app/o/final_image%2Favatar.png?alt=media&token=8c81feb3-eeaa-44c5-bbfa-342d40a92333';
 
+  // ตรวจสอบข้อมูลจำเป็น
   if (!name || !email || !password) {
     return res.status(400).json({ error: 'กรุณากรอกชื่อ อีเมล และรหัสผ่านให้ครบถ้วน' });
   }
 
+  // ตรวจสอบความซับซ้อนของรหัสผ่าน
   const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
   if (!passwordRegex.test(password)) {
     return res.status(400).json({
@@ -179,19 +179,16 @@ router.post("/register", async (req, res) => {
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    // SQL เฉพาะคอลัมน์ที่มีอยู่จริง
     const sqlInsertUser = `
-            INSERT INTO user (
-                name, email, password,
-                height, weight, shirt_size,
-                chest, waist_circumference, hip,
-                personal_description, profile_image
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `;
+      INSERT INTO user (
+        name, email, password,
+        personal_description, profile_image
+      ) VALUES (?, ?, ?, ?, ?)
+    `;
 
     const userValues = [
       name, email, hashedPassword,
-      height, weight, shirt_size,
-      chest, waist_circumference, hip,
       personal_description,
       defaultProfileImage
     ];
@@ -204,26 +201,23 @@ router.post("/register", async (req, res) => {
 
       const userId = result.insertId;
 
-      // ถ้ามี category_ids ส่งมา และเป็น array
+      // ถ้ามี category_ids
       if (Array.isArray(category_ids) && category_ids.length > 0) {
-        // เตรียมข้อมูลที่จะ insert
         const userCategoryValues = category_ids.map(catId => [userId, catId]);
 
         const sqlInsertUserCategory = `
-                    INSERT INTO user_category (user_id_fk, category_id_fk)
-                    VALUES ?
-                `;
+          INSERT INTO user_category (user_id_fk, category_id_fk)
+          VALUES ?
+        `;
 
         conn.query(sqlInsertUserCategory, [userCategoryValues], (err2) => {
           if (err2) {
             console.error(err2);
             return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการบันทึกข้อมูล user_category' });
           }
-
           return res.status(201).json({ message: 'สมัครสมาชิกเรียบร้อยแล้ว', uid: userId });
         });
       } else {
-        // ถ้าไม่มี category_ids ส่งมา ก็ส่ง response ปกติ
         return res.status(201).json({ message: 'สมัครสมาชิกเรียบร้อยแล้ว', uid: userId });
       }
     });
@@ -232,6 +226,7 @@ router.post("/register", async (req, res) => {
     return res.status(500).json({ error: 'เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์' });
   }
 });
+
 
 
 
