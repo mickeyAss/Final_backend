@@ -14,9 +14,8 @@ router.get("/get", (req, res) => {
     const postSql = `
       SELECT 
         post.*, 
-        user.uid, user.name, user.email, user.height, user.weight, 
-        user.shirt_size, user.chest, user.waist_circumference, 
-        user.hip, user.personal_description, user.profile_image
+        user.uid, user.name, user.email, 
+        user.personal_description, user.profile_image
       FROM post
       JOIN user ON post.post_fk_uid = user.uid
       ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC
@@ -94,20 +93,14 @@ router.get("/get", (req, res) => {
                     post_fk_cid: post.post_fk_cid,
                     post_fk_uid: post.post_fk_uid,
                     post_status: post.post_status,
-                    amount_of_like: likeMap[post.post_id] || 0, // จำนวนไลก์
-                    amount_of_save: post.amount_of_save,
-                    amount_of_comment: post.amount_of_comment,
+                    amount_of_like: likeMap[post.post_id] || 0,
+                    amount_of_save: post.amount_of_save || 0,
+                    amount_of_comment: post.amount_of_comment || 0,
                   },
                   user: {
                     uid: post.uid,
                     name: post.name,
                     email: post.email,
-                    height: post.height,
-                    weight: post.weight,
-                    shirt_size: post.shirt_size,
-                    chest: post.chest,
-                    waist_circumference: post.waist_circumference,
-                    hip: post.hip,
                     personal_description: post.personal_description,
                     profile_image: post.profile_image
                   },
@@ -129,6 +122,7 @@ router.get("/get", (req, res) => {
     return res.status(500).json({ error: 'Server error' });
   }
 });
+
 
 
 
