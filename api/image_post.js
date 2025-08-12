@@ -408,128 +408,121 @@ const translateClient = new Translate({
 });
 
 router.post('/post/add', async (req, res) => {
-  let { post_topic, post_description, post_fk_uid, images, category_id_fk, hashtags, post_status } = req.body;
+  try {
+    let { post_topic, post_description, post_fk_uid, images, category_id_fk, hashtags, post_status } = req.body;
 
-  post_topic = post_topic?.trim() === '' ? null : post_topic;
-  post_description = post_description?.trim() === '' ? null : post_description;
-  post_status = (typeof post_status === 'string' && post_status.trim().toLowerCase() === 'friends') ? 'friends' : 'public';
+    post_topic = post_topic?.trim() === '' ? null : post_topic;
+    post_description = post_description?.trim() === '' ? null : post_description;
+    post_status = (typeof post_status === 'string' && post_status.trim().toLowerCase() === 'friends') ? 'friends' : 'public';
 
-  if (!post_fk_uid || !Array.isArray(images)) {
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
-
-  const insertPostSql = `
-    INSERT INTO post (post_topic, post_description, post_date, post_fk_uid, post_status)
-    VALUES (?, ?, NOW(), ?, ?)
-  `;
-
-  conn.query(insertPostSql, [post_topic, post_description, post_fk_uid, post_status], async (err, postResult) => {
-    if (err) {
-      console.error(err);
-      return res.status(500).json({ error: 'Failed to insert post' });
+    if (!post_fk_uid || !Array.isArray(images)) {
+      return res.status(400).json({ error: 'Missing required fields: post_fk_uid or images' });
     }
+
+    // Insert post
+    const insertPostSql = `
+      INSERT INTO post (post_topic, post_description, post_date, post_fk_uid, post_status)
+      VALUES (?, ?, NOW(), ?, ?)
+    `;
+
+    const postResult = await new Promise((resolve, reject) => {
+      conn.query(insertPostSql, [post_topic, post_description, post_fk_uid, post_status], (err, result) => {
+        if (err) reject(err);
+        else resolve(result);
+      });
+    });
 
     const insertedPostId = postResult.insertId;
 
-    // ฟังก์ชันแทรกรูปภาพ
+    // Insert images
     const insertImages = () => {
       if (!images.length) return Promise.resolve();
       const insertImageSql = `INSERT INTO image_post (image, image_fk_postid) VALUES ?`;
-      const imageValues = images.map((url) => [url, insertedPostId]);
+      const imageValues = images.map(url => [url, insertedPostId]);
       return new Promise((resolve, reject) => {
         conn.query(insertImageSql, [imageValues], (err) => {
-          if (err) return reject(err);
-          resolve();
+          if (err) reject(err);
+          else resolve();
         });
       });
     };
 
-    // ฟังก์ชันวิเคราะห์ภาพ + insert ลง post_image_analysis
-    const analyzeImages = () => {
-      return new Promise(async (resolve, reject) => {
+    // Analyze images
+    const analyzeImages = async () => {
+      for (const imgUrl of images) {
         try {
-          for (let imgUrl of images) {
-            try {
-              const [result] = await visionClient.labelDetection(imgUrl);
-              const labels = result.labelAnnotations;
-              let detectedLabels = labels.length ? labels.map(label => label.description).join(', ') : '';
+          const [result] = await visionClient.labelDetection(imgUrl);
+          const labels = result.labelAnnotations;
+          let detectedLabels = labels.length ? labels.map(label => label.description).join(', ') : '';
 
-              // แปลข้อความ label เป็นภาษาไทย
-              let translatedText = detectedLabels;
-              if (detectedLabels.trim()) {
-                const [translation] = await translateClient.translate(detectedLabels, 'th');
-                translatedText = translation;
-              }
+          let translatedText = detectedLabels;
+          if (detectedLabels.trim()) {
+            const [translation] = await translateClient.translate(detectedLabels, 'th');
+            translatedText = translation;
+          }
 
-              console.log(`Image URL: ${imgUrl}`);
-              console.log(`Detected Labels: ${detectedLabels}`);
-              console.log(`Translated Text: ${translatedText}`);
-
-              const sql = `
+          const sql = `
             INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text, created_at)
             VALUES (?, ?, ?, NOW())
           `;
 
-              await new Promise((res, rej) => {
-                conn.query(sql, [insertedPostId, imgUrl, translatedText], (err) => {
-                  if (err) return rej(err);
-                  res();
-                });
-              });
-            } catch (error) {
-              console.error(`Error analyzing image ${imgUrl}:`, error);
-            }
-          }
-          resolve();
-        } catch (e) {
-          reject(e);
+          await new Promise((res, rej) => {
+            conn.query(sql, [insertedPostId, imgUrl, translatedText], (err) => {
+              if (err) rej(err);
+              else res();
+            });
+          });
+        } catch (error) {
+          console.error(`Error analyzing image ${imgUrl}:`, error);
         }
-      });
+      }
     };
 
+    // Insert categories
     const insertCategories = () => {
       if (!Array.isArray(category_id_fk) || category_id_fk.length === 0) return Promise.resolve();
       const insertCategorySql = `INSERT INTO post_category (category_id_fk, post_id_fk) VALUES ?`;
-      const categoryValues = category_id_fk.map((catId) => [catId, insertedPostId]);
+      const categoryValues = category_id_fk.map(catId => [catId, insertedPostId]);
       return new Promise((resolve, reject) => {
         conn.query(insertCategorySql, [categoryValues], (err) => {
-          if (err) return reject(err);
-          resolve();
+          if (err) reject(err);
+          else resolve();
         });
       });
     };
 
+    // Insert hashtags
     const insertPostHashtags = () => {
       if (!Array.isArray(hashtags) || hashtags.length === 0) return Promise.resolve();
       const insertPostHashtagSql = `INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?`;
       const values = hashtags.map(tagId => [insertedPostId, tagId]);
       return new Promise((resolve, reject) => {
         conn.query(insertPostHashtagSql, [values], (err) => {
-          if (err) return reject(err);
-          resolve();
+          if (err) reject(err);
+          else resolve();
         });
       });
     };
 
-    Promise.all([
+    // รันทุกงานพร้อมกัน
+    await Promise.all([
       insertImages(),
       insertCategories(),
       insertPostHashtags(),
-      analyzeImages(), // เพิ่มการวิเคราะห์ภาพ
-    ])
-      .then(() => {
-        res.status(201).json({
-          message: 'Post, images, categories, hashtags, and image analysis inserted',
-          post_id: insertedPostId,
-          post_status,
-        });
-      })
-      .catch((err) => {
-        console.error(err);
-        res.status(500).json({ error: 'Failed to insert post data or analyze images' });
-      });
-  });
+      analyzeImages(),
+    ]);
+
+    return res.status(201).json({
+      message: 'Post and related data inserted successfully',
+      post_id: insertedPostId,
+      post_status,
+    });
+  } catch (error) {
+    console.error('Error in /post/add:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
 });
+
 
 
 
