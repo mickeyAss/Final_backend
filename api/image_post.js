@@ -451,37 +451,42 @@ router.post('/post/add', async (req, res) => {
     };
 
     // ฟังก์ชันวิเคราะห์ภาพ + insert ลง post_image_analysis
-    const analyzeImages = async () => {
-      for (let imgUrl of images) {
+    const analyzeImages = () => {
+      return new Promise(async (resolve, reject) => {
         try {
-          // ใช้ Google Vision API ตรวจข้อความในภาพ
-          const [result] = await visionClient.textDetection(imgUrl);
-          const detections = result.textAnnotations;
-          let extractedText = detections.length ? detections[0].description : '';
+          for (let imgUrl of images) {
+            try {
+              const [result] = await visionClient.textDetection(imgUrl);
+              const detections = result.textAnnotations;
+              let extractedText = detections.length ? detections[0].description : '';
 
-          // แปลข้อความเป็นภาษาไทย
-          let translatedText = extractedText;
-          if (extractedText.trim()) {
-            const [translation] = await translateClient.translate(extractedText, 'th');
-            translatedText = translation;
+              let translatedText = extractedText;
+              if (extractedText.trim()) {
+                const [translation] = await translateClient.translate(extractedText, 'th');
+                translatedText = translation;
+              }
+
+              const sql = `
+            INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text, created_at)
+            VALUES (?, ?, ?, NOW())
+          `;
+
+              await new Promise((res, rej) => {
+                conn.query(sql, [insertedPostId, imgUrl, translatedText], (err) => {
+                  if (err) return rej(err);
+                  res();
+                });
+              });
+            } catch (error) {
+              console.error(`Error analyzing image ${imgUrl}:`, error);
+              // ไม่ throw เพื่อให้ลูปทำงานต่อ
+            }
           }
-
-          // Insert ลงฐานข้อมูล
-          await new Promise((resolve, reject) => {
-            const sql = `
-              INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text, created_at)
-              VALUES (?, ?, ?, NOW())
-            `;
-            conn.query(sql, [insertedPostId, imgUrl, translatedText], (err) => {
-              if (err) return reject(err);
-              resolve();
-            });
-          });
-
-        } catch (error) {
-          console.error(`Error analyzing image ${imgUrl}:`, error);
+          resolve();
+        } catch (e) {
+          reject(e);
         }
-      }
+      });
     };
 
     const insertCategories = () => {
