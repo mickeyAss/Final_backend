@@ -262,10 +262,6 @@ router.get("/get/:uid", (req, res) => {
   }
 });
 
-// ต้องอยู่บนสุดไฟล์ API
-const admin = require('firebase-admin');
-const serviceAccount = require('../final-project-2f65c-firebase-adminsdk-fbsvc-b7cc350036.json');
-
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),

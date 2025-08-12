@@ -93,6 +93,7 @@ router.get("/get", (req, res) => {
                     post_date: post.post_date,
                     post_fk_cid: post.post_fk_cid,
                     post_fk_uid: post.post_fk_uid,
+                    post_status: post.post_status,
                     amount_of_like: likeMap[post.post_id] || 0, // จำนวนไลก์
                     amount_of_save: post.amount_of_save,
                     amount_of_comment: post.amount_of_comment,
