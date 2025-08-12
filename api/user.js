@@ -1,10 +1,23 @@
 var express = require('express');
 var router = express.Router();
-var conn = require('../dbconnect')
+var conn = require('../dbconnect');
+
+const admin = require('firebase-admin');
+const serviceAccount = require('../final-project-2f65c-firebase-adminsdk-fbsvc-b7cc350036.json');
+
+const bcrypt = require('bcrypt'); // ต้องติดตั้งก่อน: npm install bcrypt
+
+// เริ่มต้น Firebase Admin SDK พร้อมระบุ databaseURL (สำคัญ)
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    databaseURL: "https://final-project-2f65c-default-rtdb.firebaseio.com" // แก้ให้ตรงกับ URL ของ Firebase Realtime Database ของคุณ
+  });
+}
 
 module.exports = router;
 
-//เส้น Api ดึงข้อมูลทั้งหมดจากเทเบิ้ล user
+// API: ดึงข้อมูล user ทั้งหมด (แบบสุ่ม)
 router.get("/get", (req, res) => {
   try {
     conn.query("SELECT * FROM user ORDER BY RAND()", (err, result) => {
@@ -15,7 +28,7 @@ router.get("/get", (req, res) => {
       if (result.length === 0) {
         return res.status(404).json({ error: 'No users found' });
       }
-      res.status(200).json(result); // ส่งข้อมูลผู้ใช้ทั้งหมด แบบสุ่ม
+      res.status(200).json(result);
     });
   } catch (err) {
     console.log(err);
@@ -23,6 +36,7 @@ router.get("/get", (req, res) => {
   }
 });
 
+// API: ดึง user ที่ไม่ใช่ตัวเองและยังไม่ได้ follow
 router.get("/users-except", (req, res) => {
   const loggedInUid = req.query.uid;
 
@@ -58,16 +72,7 @@ router.get("/users-except", (req, res) => {
   }
 });
 
-
-const admin = require('firebase-admin');
-const serviceAccount = require('../final-project-2f65c-firebase-adminsdk-fbsvc-b7cc350036.json');
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
-//เส้น Api เข้าสู่ระบบ user
-const bcrypt = require('bcrypt'); // ต้องติดตั้งก่อน: npm install bcrypt
-
+// API: เข้าสู่ระบบ (Login) โดยรองรับ Google Login และ Login ปกติ
 router.post("/login", async (req, res) => {
   const { email, password, isGoogleLogin, idToken, name, profile_image } = req.body;
 
@@ -76,7 +81,7 @@ router.post("/login", async (req, res) => {
     let finalName = name;
     let finalProfileImage = profile_image;
 
-    // ถ้าเป็น Google Login → ตรวจสอบ idToken
+    // Google Login: ตรวจสอบ idToken
     if (isGoogleLogin) {
       if (!idToken) {
         return res.status(400).json({ error: "Google ID Token is required" });
@@ -88,7 +93,7 @@ router.post("/login", async (req, res) => {
       finalProfileImage = decoded.picture || "";
     }
 
-    // ค้นหา user ใน MySQL
+    // ค้นหา user ในฐานข้อมูล MySQL
     const results = await new Promise((resolve, reject) => {
       conn.query("SELECT * FROM user WHERE email = ?", [finalEmail], (err, results) => {
         if (err) reject(err);
@@ -98,7 +103,7 @@ router.post("/login", async (req, res) => {
 
     let user;
     if (!results || results.length === 0) {
-      // ถ้าไม่มี user → สร้างใหม่ (Google login เท่านั้นถึงสร้างได้)
+      // ถ้าไม่มี user → สร้างใหม่ (เฉพาะ Google Login)
       if (!isGoogleLogin) {
         return res.status(404).json({ error: "User not found" });
       }
@@ -125,14 +130,14 @@ router.post("/login", async (req, res) => {
       return res.status(200).json({ message: "Google login successful (new user)", user });
     }
 
-    // มี user อยู่แล้ว
+    // user มีในระบบแล้ว
     user = results[0];
 
     if (isGoogleLogin) {
       return res.status(200).json({ message: "Google login successful", user });
     }
 
-    // ถ้าเป็น login ปกติ → ตรวจสอบ password
+    // login ปกติ: ตรวจสอบ password
     if (!password) {
       return res.status(400).json({ error: "Password is required" });
     }
@@ -150,25 +155,20 @@ router.post("/login", async (req, res) => {
   }
 });
 
-
-
-
-//เส้น Api สมัครสมาชิก user
+// API: สมัครสมาชิก (Register)
 router.post("/register", async (req, res) => {
   const {
     name, email, password,
     personal_description,
-    category_ids // รับมาจาก body เป็น array เช่น [1, 2, 3]
+    category_ids // เป็น array เช่น [1, 2, 3]
   } = req.body;
 
   const defaultProfileImage = 'https://firebasestorage.googleapis.com/v0/b/final-project-2f65c.firebasestorage.app/o/final_image%2Favatar.png?alt=media&token=8c81feb3-eeaa-44c5-bbfa-342d40a92333';
 
-  // ตรวจสอบข้อมูลจำเป็น
   if (!name || !email || !password) {
     return res.status(400).json({ error: 'กรุณากรอกชื่อ อีเมล และรหัสผ่านให้ครบถ้วน' });
   }
 
-  // ตรวจสอบความซับซ้อนของรหัสผ่าน
   const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
   if (!passwordRegex.test(password)) {
     return res.status(400).json({
@@ -179,7 +179,6 @@ router.post("/register", async (req, res) => {
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // SQL เฉพาะคอลัมน์ที่มีอยู่จริง
     const sqlInsertUser = `
       INSERT INTO user (
         name, email, password,
@@ -201,7 +200,6 @@ router.post("/register", async (req, res) => {
 
       const userId = result.insertId;
 
-      // ถ้ามี category_ids
       if (Array.isArray(category_ids) && category_ids.length > 0) {
         const userCategoryValues = category_ids.map(catId => [userId, catId]);
 
@@ -227,10 +225,7 @@ router.post("/register", async (req, res) => {
   }
 });
 
-
-
-
-//เส้น Api ดึงข้อมูลทั้งหมดของ user ตาม uid
+// API: ดึงข้อมูล user ตาม uid
 router.get("/get/:uid", (req, res) => {
   const uid = req.params.uid;
 
@@ -249,7 +244,7 @@ router.get("/get/:uid", (req, res) => {
         return res.status(404).json({ error: 'User not found' });
       }
 
-      return res.status(200).json(result[0]); // ส่งข้อมูลผู้ใช้ที่เจอ
+      return res.status(200).json(result[0]);
     });
   } catch (err) {
     console.error(err);
@@ -257,14 +252,7 @@ router.get("/get/:uid", (req, res) => {
   }
 });
 
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-    databaseURL: "https://final-project-2f65c-default-rtdb.firebaseio.com"
-  });
-}
-
-// POST /follow
+// API: follow user
 router.post("/follow", (req, res) => {
   const { follower_id, following_id } = req.body;
 
@@ -340,8 +328,7 @@ router.post("/follow", (req, res) => {
   });
 });
 
-
-// DELETE /unfollow
+// API: unfollow user
 router.delete("/unfollow", (req, res) => {
   const { follower_id, following_id } = req.body;
 
@@ -367,8 +354,7 @@ router.delete("/unfollow", (req, res) => {
   });
 });
 
-
-// GET /is-following?follower_id=1&following_id=2
+// API: เช็คว่ากำลังติดตามหรือไม่
 router.get("/is-following", (req, res) => {
   const { follower_id, following_id } = req.query;
 
@@ -392,8 +378,7 @@ router.get("/is-following", (req, res) => {
   });
 });
 
-
-// GET /followers-count/:uid
+// API: จำนวน followers
 router.get("/followers-count/:uid", (req, res) => {
   const uid = req.params.uid;
 
@@ -408,7 +393,7 @@ router.get("/followers-count/:uid", (req, res) => {
   });
 });
 
-// GET /following-count/:uid
+// API: จำนวน following
 router.get("/following-count/:uid", (req, res) => {
   const uid = req.params.uid;
 
@@ -423,7 +408,7 @@ router.get("/following-count/:uid", (req, res) => {
   });
 });
 
-// GET /notifications/:uid  --> ดึงแจ้งเตือนของ user id นี้ พร้อมข้อมูลผู้ส่ง (sender) และรายละเอียดโพสต์
+// API: ดึงการแจ้งเตือนพร้อมข้อมูลผู้ส่งและโพสต์ (ถ้ามี)
 router.get('/notifications/:uid', (req, res) => {
   const receiver_uid = req.params.uid;
 
@@ -441,7 +426,7 @@ router.get('/notifications/:uid', (req, res) => {
       n.message,
       n.is_read,
       n.created_at,
-      u.uid AS sender_uid_value,         -- ✅ เพิ่มเพื่อส่ง uid ของ sender
+      u.uid AS sender_uid_value,
       u.name AS sender_name,
       u.profile_image AS sender_profile_image,
       p.post_topic,
@@ -464,9 +449,7 @@ router.get('/notifications/:uid', (req, res) => {
     }
 
     if (notificationResults.length === 0) {
-      return res.status(200).json({
-        notifications: [],
-      });
+      return res.status(200).json({ notifications: [] });
     }
 
     const postIds = notificationResults
@@ -474,6 +457,7 @@ router.get('/notifications/:uid', (req, res) => {
       .filter(post_id => post_id !== null && post_id !== undefined);
 
     if (postIds.length === 0) {
+      // ไม่มีโพสต์ที่ต้องดึงรูปภาพ
       const formattedNotifications = notificationResults.map(notification => ({
         notification_id: notification.notification_id,
         sender_uid: notification.sender_uid,
@@ -484,7 +468,7 @@ router.get('/notifications/:uid', (req, res) => {
         is_read: notification.is_read,
         created_at: notification.created_at,
         sender: {
-          uid: notification.sender_uid_value, // ✅ ส่ง uid กลับไป
+          uid: notification.sender_uid_value,
           name: notification.sender_name,
           profile_image: notification.sender_profile_image
         },
@@ -500,11 +484,10 @@ router.get('/notifications/:uid', (req, res) => {
         } : null
       }));
 
-      return res.status(200).json({
-        notifications: formattedNotifications,
-      });
+      return res.status(200).json({ notifications: formattedNotifications });
     }
 
+    // ดึงรูปภาพของโพสต์ทั้งหมด
     const imageSql = `
       SELECT * FROM image_post 
       WHERE image_fk_postid IN (${postIds.map(() => '?').join(',')})
@@ -517,9 +500,7 @@ router.get('/notifications/:uid', (req, res) => {
       }
 
       const formattedNotifications = notificationResults.map(notification => {
-        const postImages = imageResults.filter(img => 
-          img.image_fk_postid === notification.post_id
-        );
+        const postImages = imageResults.filter(img => img.image_fk_postid === notification.post_id);
 
         return {
           notification_id: notification.notification_id,
@@ -531,7 +512,7 @@ router.get('/notifications/:uid', (req, res) => {
           is_read: notification.is_read,
           created_at: notification.created_at,
           sender: {
-            uid: notification.sender_uid_value, // ✅ ส่ง uid กลับไป
+            uid: notification.sender_uid_value,
             name: notification.sender_name,
             profile_image: notification.sender_profile_image
           },
@@ -548,12 +529,7 @@ router.get('/notifications/:uid', (req, res) => {
         };
       });
 
-      return res.status(200).json({
-        notifications: formattedNotifications,
-      });
+      return res.status(200).json({ notifications: formattedNotifications });
     });
   });
 });
-
-
-
