@@ -436,29 +436,6 @@ router.post('/post/add', async (req, res) => {
 
     const insertedPostId = postResult.insertId;
 
-    // วิเคราะห์ภาพ: ดึง label ทั้งหมด + แปลเป็นไทย
-    const analyzeImageLabels = async (imageUri) => {
-      try {
-        const [result] = await visionClient.labelDetection(imageUri);
-        const labels = result.labelAnnotations.map(label => label.description);
-
-        if (labels.length === 0) return ['ไม่พบวัตถุในภาพ'];
-
-        const [translated] = await translateClient.translate(labels, 'th');
-        return translated;
-      } catch (e) {
-        console.error(`Label detection error for image ${imageUri}:`, e);
-        return ['เกิดข้อผิดพลาดในการวิเคราะห์ภาพ'];
-      }
-    };
-
-    let labelResults = [];
-    try {
-      labelResults = await Promise.all(images.map(imgUrl => analyzeImageLabels(imgUrl)));
-    } catch (e) {
-      console.warn('Error during label detection:', e);
-    }
-
     // ฟังก์ชันแทรกรูปภาพ
     const insertImages = () => {
       if (!images.length) return Promise.resolve();
@@ -498,45 +475,25 @@ router.post('/post/add', async (req, res) => {
       });
     };
 
-    // ฟังก์ชันแทรกข้อความวิเคราะห์ภาพ
-    const insertImageAnalysis = () => {
-      if (!labelResults.length) return Promise.resolve();
-
-      const values = labelResults.map((texts, idx) => [
-        insertedPostId,
-        images[idx],
-        Array.isArray(texts) ? texts.join(', ') : texts,
-      ]);
-
-      const sql = `INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text) VALUES ?`;
-      return new Promise((resolve, reject) => {
-        conn.query(sql, [values], (err) => {
-          if (err) return reject(err);
-          resolve();
-        });
-      });
-    };
-
     Promise.all([
       insertImages(),
       insertCategories(),
       insertPostHashtags(),
-      insertImageAnalysis(),
     ])
       .then(() => {
         res.status(201).json({
-          message: 'Post, images, categories, hashtags, analysis inserted',
+          message: 'Post, images, categories, hashtags inserted',
           post_id: insertedPostId,
           post_status,
-          image_analysis: labelResults,
         });
       })
       .catch((err) => {
         console.error(err);
-        res.status(500).json({ error: 'Failed to insert images, categories, hashtags, or analysis' });
+        res.status(500).json({ error: 'Failed to insert images, categories, or hashtags' });
       });
   });
 });
+
 
 // --------------------------------------------
 // API GET /by-user/:uid
