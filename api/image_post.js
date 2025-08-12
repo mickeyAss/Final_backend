@@ -456,15 +456,20 @@ router.post('/post/add', async (req, res) => {
         try {
           for (let imgUrl of images) {
             try {
-              const [result] = await visionClient.textDetection(imgUrl);
-              const detections = result.textAnnotations;
-              let extractedText = detections.length ? detections[0].description : '';
+              const [result] = await visionClient.labelDetection(imgUrl);
+              const labels = result.labelAnnotations;
+              let detectedLabels = labels.length ? labels.map(label => label.description).join(', ') : '';
 
-              let translatedText = extractedText;
-              if (extractedText.trim()) {
-                const [translation] = await translateClient.translate(extractedText, 'th');
+              // แปลข้อความ label เป็นภาษาไทย
+              let translatedText = detectedLabels;
+              if (detectedLabels.trim()) {
+                const [translation] = await translateClient.translate(detectedLabels, 'th');
                 translatedText = translation;
               }
+
+              console.log(`Image URL: ${imgUrl}`);
+              console.log(`Detected Labels: ${detectedLabels}`);
+              console.log(`Translated Text: ${translatedText}`);
 
               const sql = `
             INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text, created_at)
@@ -479,7 +484,6 @@ router.post('/post/add', async (req, res) => {
               });
             } catch (error) {
               console.error(`Error analyzing image ${imgUrl}:`, error);
-              // ไม่ throw เพื่อให้ลูปทำงานต่อ
             }
           }
           resolve();
