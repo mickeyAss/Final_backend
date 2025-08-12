@@ -1097,126 +1097,127 @@ router.get('/saved-posts/full/:user_id', (req, res) => {
 // ดึงโพสต์ทั้งหมดของคนที่ user กำลังติดตาม พร้อมข้อมูลครบถ้วน
 // (ทำแบบเดียวกับ API /get แต่แสดงเฉพาะโพสต์ของคนที่ติดตาม)
 // --------------------------------------------
-router.get("/following-posts", async (req, res) => {
-  try {
-    const uid = req.query.uid;
-    if (!uid) {
-      return res.status(400).json({ error: "Missing uid parameter" });
-    }
+router.get('/following-posts/:user_id', (req, res) => {
+  const { user_id } = req.params;
 
-    const query = `
+  if (!user_id) {
+    return res.status(400).json({ error: 'Missing user_id parameter' });
+  }
+
+  try {
+    // Query ดึงโพสต์ของคนที่เรากำลังติดตาม พร้อมข้อมูลผู้ใช้ (ตัดข้อมูลส่วนสูง น้ำหนัก และขนาดต่างๆ ออก)
+    const postSql = `
       SELECT 
-        p.*,
-        u.uid,
-        u.name,
-        u.email,
-        u.personal_description,
-        u.profile_image
-      FROM post p
-      JOIN user u ON p.post_fk_uid = u.uid
-      JOIN follow f ON f.following_id = u.uid
-      WHERE f.follower_id = ?
-      ORDER BY p.post_date DESC
+        post.*, 
+        user.uid, user.name, user.email, 
+        user.personal_description, user.profile_image
+      FROM post
+      JOIN user ON post.post_fk_uid = user.uid
+      JOIN user_followers uf ON user.uid = uf.following_id
+      WHERE uf.follower_id = ?
+      ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC
     `;
 
-    conn.query(query, [uid], async (err, posts) => {
-      if (err) {
-        console.error(err);
-        return res.status(500).json({ error: "Database query error" });
-      }
+    conn.query(postSql, [user_id], (err, postResults) => {
+      if (err) return res.status(400).json({ error: 'Post query error' });
 
-      // ดึง post_id ทั้งหมดเพื่อนับไลก์
-      const postIds = posts.map(p => p.post_id);
-      let likeMap = {};
-      if (postIds.length > 0) {
-        const likeQuery = `
-          SELECT post_id, COUNT(*) AS like_count
-          FROM likes
-          WHERE post_id IN (?)
-          GROUP BY post_id
+      if (postResults.length === 0)
+        return res.status(404).json({ error: 'No posts found from people you follow' });
+
+      // ดึงรูปภาพทั้งหมดจากตาราง image_post
+      const imageSql = `SELECT * FROM image_post`;
+      conn.query(imageSql, (err, imageResults) => {
+        if (err) return res.status(400).json({ error: 'Image query error' });
+
+        // ดึงหมวดหมู่ของโพสต์จากตาราง post_category และ category
+        const categorySql = `
+          SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
+          FROM post_category pc
+          JOIN category c ON pc.category_id_fk = c.cid
         `;
-        const likeResults = await new Promise((resolve, reject) => {
-          conn.query(likeQuery, [postIds], (err, results) => {
-            if (err) reject(err);
-            else resolve(results);
+        conn.query(categorySql, (err, categoryResults) => {
+          if (err) return res.status(400).json({ error: 'Category query error' });
+
+          // ดึงแฮชแท็กของโพสต์จาก post_hashtags และ hashtags
+          const hashtagSql = `
+            SELECT ph.post_id_fk, h.tag_id, h.tag_name 
+            FROM post_hashtags ph
+            JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
+          `;
+          conn.query(hashtagSql, (err, hashtagResults) => {
+            if (err) return res.status(400).json({ error: 'Hashtag query error' });
+
+            // ดึงจำนวนไลก์แต่ละโพสต์จากตาราง post_likes
+            const likeSql = `
+              SELECT post_id_fk AS post_id, COUNT(*) AS like_count 
+              FROM post_likes 
+              GROUP BY post_id_fk
+            `;
+            conn.query(likeSql, (err, likeResults) => {
+              if (err) return res.status(400).json({ error: 'Like count query error' });
+
+              // สร้างแผนที่จำนวนไลก์สำหรับแต่ละโพสต์
+              const likeMap = {};
+              likeResults.forEach(item => {
+                likeMap[item.post_id] = item.like_count;
+              });
+
+              // รวมข้อมูลโพสต์, ผู้ใช้, รูปภาพ, หมวดหมู่, แฮชแท็ก, และจำนวนไลก์
+              const postsWithData = postResults.map(post => {
+                const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
+                const categories = categoryResults
+                  .filter(cat => cat.post_id_fk === post.post_id)
+                  .map(cat => ({
+                    cid: cat.cid,
+                    cname: cat.cname,
+                    cimage: cat.cimage,
+                    ctype: cat.ctype
+                  }));
+
+                const hashtags = hashtagResults
+                  .filter(ht => ht.post_id_fk === post.post_id)
+                  .map(ht => ({
+                    tag_id: ht.tag_id,
+                    tag_name: ht.tag_name
+                  }));
+
+                return {
+                  post: {
+                    post_id: post.post_id,
+                    post_topic: post.post_topic,
+                    post_description: post.post_description,
+                    post_date: post.post_date,
+                    post_fk_uid: post.post_fk_uid,
+                    amount_of_like: likeMap[post.post_id] || 0,
+                    amount_of_save: post.amount_of_save,
+                    amount_of_comment: post.amount_of_comment,
+                  },
+                  user: {
+                    uid: post.uid,
+                    name: post.name,
+                    email: post.email,
+                    personal_description: post.personal_description,
+                    profile_image: post.profile_image
+                  },
+                  images,
+                  categories,
+                  hashtags
+                };
+              });
+
+              // ส่งข้อมูลโพสต์ทั้งหมดของคนที่ติดตามกลับไป
+              res.status(200).json(postsWithData);
+            });
           });
         });
-
-        likeResults.forEach(row => {
-          likeMap[row.post_id] = row.like_count;
-        });
-      }
-
-      // ดึงรูปภาพ
-      const postsWithData = await Promise.all(posts.map(async (post) => {
-        const images = await new Promise((resolve, reject) => {
-          conn.query(
-            "SELECT * FROM post_images WHERE post_id = ?",
-            [post.post_id],
-            (err, results) => {
-              if (err) reject(err);
-              else resolve(results);
-            }
-          );
-        });
-
-        const categories = await new Promise((resolve, reject) => {
-          conn.query(
-            `SELECT c.* FROM categories c 
-             JOIN post_categories pc ON c.category_id = pc.category_id
-             WHERE pc.post_id = ?`,
-            [post.post_id],
-            (err, results) => {
-              if (err) reject(err);
-              else resolve(results);
-            }
-          );
-        });
-
-        const hashtags = await new Promise((resolve, reject) => {
-          conn.query(
-            `SELECT h.* FROM hashtags h 
-             JOIN post_hashtags ph ON h.hashtag_id = ph.hashtag_id
-             WHERE ph.post_id = ?`,
-            [post.post_id],
-            (err, results) => {
-              if (err) reject(err);
-              else resolve(results);
-            }
-          );
-        });
-
-        return {
-          post: {
-            post_id: post.post_id,
-            post_topic: post.post_topic,
-            post_description: post.post_description,
-            post_date: post.post_date,
-            post_fk_uid: post.post_fk_uid,
-            amount_of_like: likeMap[post.post_id] || 0,
-            amount_of_save: post.amount_of_save,
-            amount_of_comment: post.amount_of_comment
-          },
-          user: {
-            uid: post.uid,
-            name: post.name,
-            email: post.email,
-            personal_description: post.personal_description,
-            profile_image: post.profile_image
-          },
-          images,
-          categories,
-          hashtags
-        };
-      }));
-
-      res.json(postsWithData);
+      });
     });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Server error" });
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({ error: 'Server error' });
   }
 });
+
 
 // PUT หรือ PATCH สำหรับอัพเดตสถานะอ่าน notification
 // API อัปเดต is_read ของ notification
