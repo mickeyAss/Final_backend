@@ -450,7 +450,40 @@ router.post('/post/add', async (req, res) => {
       });
     };
 
-    // ฟังก์ชันแทรกหมวดหมู่
+    // ฟังก์ชันวิเคราะห์ภาพ + insert ลง post_image_analysis
+    const analyzeImages = async () => {
+      for (let imgUrl of images) {
+        try {
+          // ใช้ Google Vision API ตรวจข้อความในภาพ
+          const [result] = await visionClient.textDetection(imgUrl);
+          const detections = result.textAnnotations;
+          let extractedText = detections.length ? detections[0].description : '';
+
+          // แปลข้อความเป็นภาษาไทย
+          let translatedText = extractedText;
+          if (extractedText.trim()) {
+            const [translation] = await translateClient.translate(extractedText, 'th');
+            translatedText = translation;
+          }
+
+          // Insert ลงฐานข้อมูล
+          await new Promise((resolve, reject) => {
+            const sql = `
+              INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text, created_at)
+              VALUES (?, ?, ?, NOW())
+            `;
+            conn.query(sql, [insertedPostId, imgUrl, translatedText], (err) => {
+              if (err) return reject(err);
+              resolve();
+            });
+          });
+
+        } catch (error) {
+          console.error(`Error analyzing image ${imgUrl}:`, error);
+        }
+      }
+    };
+
     const insertCategories = () => {
       if (!Array.isArray(category_id_fk) || category_id_fk.length === 0) return Promise.resolve();
       const insertCategorySql = `INSERT INTO post_category (category_id_fk, post_id_fk) VALUES ?`;
@@ -463,7 +496,6 @@ router.post('/post/add', async (req, res) => {
       });
     };
 
-    // ฟังก์ชันแทรกแฮชแท็ก
     const insertPostHashtags = () => {
       if (!Array.isArray(hashtags) || hashtags.length === 0) return Promise.resolve();
       const insertPostHashtagSql = `INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?`;
@@ -480,20 +512,22 @@ router.post('/post/add', async (req, res) => {
       insertImages(),
       insertCategories(),
       insertPostHashtags(),
+      analyzeImages(), // เพิ่มการวิเคราะห์ภาพ
     ])
       .then(() => {
         res.status(201).json({
-          message: 'Post, images, categories, hashtags inserted',
+          message: 'Post, images, categories, hashtags, and image analysis inserted',
           post_id: insertedPostId,
           post_status,
         });
       })
       .catch((err) => {
         console.error(err);
-        res.status(500).json({ error: 'Failed to insert images, categories, or hashtags' });
+        res.status(500).json({ error: 'Failed to insert post data or analyze images' });
       });
   });
 });
+
 
 
 // --------------------------------------------
