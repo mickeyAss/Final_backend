@@ -11,12 +11,12 @@ const bcrypt = require('bcrypt'); // ต้องติดตั้งก่อ�
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
-    databaseURL: "https://final-project-2f65c-default-rtdb.firebaseio.com" // แก้ให้ตรงกับ URL ของ Firebase Realtime Database ของคุณ
+    databaseURL: "https://final-project-2f65c-default-rtdb.firebaseio.com/" // แก้ให้ตรงกับ URL ของ Firebase Realtime Database ของคุณ
   });
 }
 
 module.exports = router;
-
+  
 /* ----------------------- API: ดึงข้อมูลผู้ใช้ ----------------------- */
 
 // ดึงผู้ใช้ทั้งหมดแบบสุ่ม
@@ -75,78 +75,54 @@ router.get("/users-except", (req, res) => {
 });
 
 // เข้าสู่ระบบ (Login) รองรับทั้ง Google Login และ Login ปกติ
-router.post("/login", async (req, res) => {
-  const { email, password, isGoogleLogin, idToken, name, profile_image } = req.body;
+app.post("/login", async (req, res) => {
+  const { email, isGoogleLogin, idToken, name, profile_image, password } = req.body;
 
   try {
     let finalEmail = email;
     let finalName = name;
     let finalProfileImage = profile_image;
 
-    // ----- Google Login: ตรวจสอบ idToken -----
+    // ตรวจสอบ Google Token
     if (isGoogleLogin) {
-      if (!idToken) {
-        return res.status(400).json({ error: "Google ID Token is required" });
-      }
-
+      if (!idToken) return res.status(400).json({ error: "Google ID Token is required" });
       try {
         const decoded = await admin.auth().verifyIdToken(idToken);
         finalEmail = decoded.email;
         finalName = decoded.name || "";
         finalProfileImage = decoded.picture || "";
-        console.log("Google token verified:", decoded);
+        console.log("✅ Google token verified:", decoded);
       } catch (e) {
-        console.error("Google verifyIdToken error:", e);
+        console.error("❌ Invalid Google ID Token:", e);
         return res.status(401).json({ error: "Invalid Google ID Token" });
       }
     }
 
-    // ----- ค้นหา user ในฐานข้อมูล -----
+    // ค้นหา user ในฐานข้อมูล
     const results = await new Promise((resolve, reject) => {
       conn.query("SELECT * FROM user WHERE email = ?", [finalEmail], (err, results) => {
-        if (err) {
-          console.error("MySQL query error:", err);
-          reject(err);
-        } else {
-          resolve(results);
-        }
+        if (err) reject(err);
+        else resolve(results);
       });
     });
 
     let user;
     if (!results || results.length === 0) {
-      // ----- ไม่มี user → สร้างใหม่ (เฉพาะ Google Login) -----
-      if (!isGoogleLogin) {
-        return res.status(404).json({ error: "User not found" });
-      }
+      // สร้าง user ใหม่ สำหรับ Google login
+      if (!isGoogleLogin) return res.status(404).json({ error: "User not found" });
 
       const insertResult = await new Promise((resolve, reject) => {
-        const sqlInsert = `
-          INSERT INTO user (name, email, password, profile_image)
-          VALUES (?, ?, ?, ?)
-        `;
-        conn.query(sqlInsert, [finalName, finalEmail, "", finalProfileImage], (err, result) => {
-          if (err) {
-            console.error("MySQL insert error:", err);
-            reject(err);
-          } else {
-            resolve(result);
-          }
-        });
+        conn.query(
+          "INSERT INTO user (name, email, password, profile_image) VALUES (?, ?, ?, ?)",
+          [finalName, finalEmail, "", finalProfileImage],
+          (err, result) => (err ? reject(err) : resolve(result))
+        );
       });
-
-      if (!insertResult || !insertResult.insertId) {
-        return res.status(500).json({ error: "Failed to create new user" });
-      }
 
       const newUserResults = await new Promise((resolve, reject) => {
         conn.query("SELECT * FROM user WHERE uid = ?", [insertResult.insertId], (err, results) => {
-          if (err) {
-            console.error("MySQL fetch new user error:", err);
-            reject(err);
-          } else {
-            resolve(results);
-          }
+          if (err) reject(err);
+          else resolve(results);
         });
       });
 
@@ -154,22 +130,16 @@ router.post("/login", async (req, res) => {
       return res.status(200).json({ message: "Google login successful (new user)", user });
     }
 
-    // ----- user มีในระบบแล้ว -----
     user = results[0];
 
     if (isGoogleLogin) {
       return res.status(200).json({ message: "Google login successful", user });
     }
 
-    // ----- login ปกติ: ตรวจสอบ password -----
-    if (!password) {
-      return res.status(400).json({ error: "Password is required" });
-    }
-
+    // login ปกติ
+    if (!password) return res.status(400).json({ error: "Password is required" });
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(401).json({ error: "Invalid password" });
-    }
+    if (!isMatch) return res.status(401).json({ error: "Invalid password" });
 
     res.status(200).json({ message: "Login successful", user });
 
