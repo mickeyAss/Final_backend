@@ -16,7 +16,7 @@ if (!admin.apps.length) {
 }
 
 module.exports = router;
-  
+
 /* ----------------------- API: ดึงข้อมูลผู้ใช้ ----------------------- */
 
 // ดึงผู้ใช้ทั้งหมดแบบสุ่ม
@@ -75,7 +75,7 @@ router.get("/users-except", (req, res) => {
 });
 
 // เข้าสู่ระบบ (Login) รองรับทั้ง Google Login และ Login ปกติ
-app.post("/login", async (req, res) => {
+router.post("/login", async (req, res) => {
   const { email, isGoogleLogin, idToken, name, profile_image, password } = req.body;
 
   try {
