@@ -83,29 +83,39 @@ router.post("/login", async (req, res) => {
     let finalName = name;
     let finalProfileImage = profile_image;
 
-    // Google Login: ตรวจสอบ idToken
+    // ----- Google Login: ตรวจสอบ idToken -----
     if (isGoogleLogin) {
       if (!idToken) {
         return res.status(400).json({ error: "Google ID Token is required" });
       }
 
-      const decoded = await admin.auth().verifyIdToken(idToken);
-      finalEmail = decoded.email;
-      finalName = decoded.name || "";
-      finalProfileImage = decoded.picture || "";
+      try {
+        const decoded = await admin.auth().verifyIdToken(idToken);
+        finalEmail = decoded.email;
+        finalName = decoded.name || "";
+        finalProfileImage = decoded.picture || "";
+        console.log("Google token verified:", decoded);
+      } catch (e) {
+        console.error("Google verifyIdToken error:", e);
+        return res.status(401).json({ error: "Invalid Google ID Token" });
+      }
     }
 
-    // ค้นหา user ในฐานข้อมูล MySQL
+    // ----- ค้นหา user ในฐานข้อมูล -----
     const results = await new Promise((resolve, reject) => {
       conn.query("SELECT * FROM user WHERE email = ?", [finalEmail], (err, results) => {
-        if (err) reject(err);
-        else resolve(results);
+        if (err) {
+          console.error("MySQL query error:", err);
+          reject(err);
+        } else {
+          resolve(results);
+        }
       });
     });
 
     let user;
     if (!results || results.length === 0) {
-      // ถ้าไม่มี user → สร้างใหม่ (เฉพาะ Google Login)
+      // ----- ไม่มี user → สร้างใหม่ (เฉพาะ Google Login) -----
       if (!isGoogleLogin) {
         return res.status(404).json({ error: "User not found" });
       }
@@ -116,15 +126,27 @@ router.post("/login", async (req, res) => {
           VALUES (?, ?, ?, ?)
         `;
         conn.query(sqlInsert, [finalName, finalEmail, "", finalProfileImage], (err, result) => {
-          if (err) reject(err);
-          else resolve(result);
+          if (err) {
+            console.error("MySQL insert error:", err);
+            reject(err);
+          } else {
+            resolve(result);
+          }
         });
       });
 
+      if (!insertResult || !insertResult.insertId) {
+        return res.status(500).json({ error: "Failed to create new user" });
+      }
+
       const newUserResults = await new Promise((resolve, reject) => {
         conn.query("SELECT * FROM user WHERE uid = ?", [insertResult.insertId], (err, results) => {
-          if (err) reject(err);
-          else resolve(results);
+          if (err) {
+            console.error("MySQL fetch new user error:", err);
+            reject(err);
+          } else {
+            resolve(results);
+          }
         });
       });
 
@@ -132,14 +154,14 @@ router.post("/login", async (req, res) => {
       return res.status(200).json({ message: "Google login successful (new user)", user });
     }
 
-    // user มีในระบบแล้ว
+    // ----- user มีในระบบแล้ว -----
     user = results[0];
 
     if (isGoogleLogin) {
       return res.status(200).json({ message: "Google login successful", user });
     }
 
-    // login ปกติ: ตรวจสอบ password
+    // ----- login ปกติ: ตรวจสอบ password -----
     if (!password) {
       return res.status(400).json({ error: "Password is required" });
     }
@@ -153,9 +175,10 @@ router.post("/login", async (req, res) => {
 
   } catch (err) {
     console.error("Login error:", err);
-    res.status(500).json({ error: "Server error" });
+    res.status(500).json({ error: err.message || "Server error" });
   }
 });
+
 
 // สมัครสมาชิก (Register) + บันทึกหมวดหมู่ที่เลือก
 router.post("/register", async (req, res) => {
