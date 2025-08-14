@@ -1264,9 +1264,9 @@ router.get('/comments/:post_id', (req, res) => {
   const { post_id } = req.params;
 
   const sql = `
-    SELECT c.comment_id, c.comment_text, c.created_at, u.user_id, u.username
+    SELECT c.comment_id, c.comment_text, c.created_at, u.uid, u.name
     FROM post_comments c
-    JOIN user u ON c.user_id_fk = u.user_id
+    JOIN user u ON c.user_id_fk = u.uid
     WHERE c.post_id_fk = ?
     ORDER BY c.created_at ASC
   `;
