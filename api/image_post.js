@@ -15,7 +15,8 @@ router.get("/get", (req, res) => {
       SELECT 
         post.*, 
         user.uid, user.name, user.email, 
-        user.personal_description, user.profile_image
+        user.personal_description, user.profile_image,
+        user.height, user.weight, user.shirt_size, user.chest, user.waist_circumference, user.hip
       FROM post
       JOIN user ON post.post_fk_uid = user.uid
       ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC
@@ -27,12 +28,10 @@ router.get("/get", (req, res) => {
       if (postResults.length === 0)
         return res.status(404).json({ error: 'No posts found' });
 
-      // ดึงรูปภาพทั้งหมดจากตาราง image_post
       const imageSql = `SELECT * FROM image_post`;
       conn.query(imageSql, (err, imageResults) => {
         if (err) return res.status(400).json({ error: 'Image query error' });
 
-        // ดึงหมวดหมู่ของโพสต์จากตาราง post_category และ category
         const categorySql = `
           SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
           FROM post_category pc
@@ -41,7 +40,6 @@ router.get("/get", (req, res) => {
         conn.query(categorySql, (err, categoryResults) => {
           if (err) return res.status(400).json({ error: 'Category query error' });
 
-          // ดึงแฮชแท็กของโพสต์จาก post_hashtags และ hashtags
           const hashtagSql = `
             SELECT ph.post_id_fk, h.tag_id, h.tag_name 
             FROM post_hashtags ph
@@ -50,7 +48,6 @@ router.get("/get", (req, res) => {
           conn.query(hashtagSql, (err, hashtagResults) => {
             if (err) return res.status(400).json({ error: 'Hashtag query error' });
 
-            // ดึงจำนวนไลก์แต่ละโพสต์จากตาราง post_likes
             const likeSql = `
               SELECT post_id_fk AS post_id, COUNT(*) AS like_count 
               FROM post_likes 
@@ -59,13 +56,11 @@ router.get("/get", (req, res) => {
             conn.query(likeSql, (err, likeResults) => {
               if (err) return res.status(400).json({ error: 'Like count query error' });
 
-              // สร้างแผนที่จำนวนไลก์สำหรับแต่ละโพสต์
               const likeMap = {};
               likeResults.forEach(item => {
                 likeMap[item.post_id] = item.like_count;
               });
 
-              // รวมข้อมูลโพสต์, ผู้ใช้, รูปภาพ, หมวดหมู่, แฮชแท็ก, และจำนวนไลก์
               const postsWithData = postResults.map(post => {
                 const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
                 const categories = categoryResults
@@ -102,7 +97,13 @@ router.get("/get", (req, res) => {
                     name: post.name,
                     email: post.email,
                     personal_description: post.personal_description,
-                    profile_image: post.profile_image
+                    profile_image: post.profile_image,
+                    height: post.height,
+                    weight: post.weight,
+                    shirt_size: post.shirt_size,
+                    chest: post.chest,
+                    waist_circumference: post.waist_circumference,
+                    hip: post.hip
                   },
                   images,
                   categories,
@@ -110,7 +111,6 @@ router.get("/get", (req, res) => {
                 };
               });
 
-              // ส่งข้อมูลโพสต์ทั้งหมดกลับไป
               res.status(200).json(postsWithData);
             });
           });

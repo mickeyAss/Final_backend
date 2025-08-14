@@ -162,6 +162,7 @@ router.post("/register", async (req, res) => {
   const {
     name, email, password,
     personal_description,
+    height, weight, shirt_size, chest, waist_circumference, hip, // เพิ่มฟิลด์ใหม่
     category_ids // เป็น array เช่น [1, 2, 3]
   } = req.body;
 
@@ -184,14 +185,21 @@ router.post("/register", async (req, res) => {
     const sqlInsertUser = `
       INSERT INTO user (
         name, email, password,
-        personal_description, profile_image
-      ) VALUES (?, ?, ?, ?, ?)
+        personal_description, profile_image,
+        height, weight, shirt_size, chest, waist_circumference, hip
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const userValues = [
       name, email, hashedPassword,
       personal_description,
-      defaultProfileImage
+      defaultProfileImage,
+      height || null,
+      weight || null,
+      shirt_size || null,
+      chest || null,
+      waist_circumference || null,
+      hip || null
     ];
 
     conn.query(sqlInsertUser, userValues, (err, result) => {
@@ -226,6 +234,7 @@ router.post("/register", async (req, res) => {
     return res.status(500).json({ error: 'เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์' });
   }
 });
+
 
 // ดึงข้อมูลผู้ใช้ตาม uid
 router.get("/get/:uid", (req, res) => {
@@ -542,32 +551,32 @@ router.get('/notifications/:uid', (req, res) => {
 
 // ค้นหาผู้ใช้จากชื่อ
 router.get('/search-users', (req, res) => {
-    const { name } = req.query; // รับ query parameter เช่น /search-users?name=กร
+  const { name } = req.query; // รับ query parameter เช่น /search-users?name=กร
 
-    if (!name) {
-        return res.status(400).json({ error: 'กรุณาระบุชื่อสำหรับค้นหา' });
-    }
+  if (!name) {
+    return res.status(400).json({ error: 'กรุณาระบุชื่อสำหรับค้นหา' });
+  }
 
-    try {
-        // ใช้ LIKE %...% เพื่อค้นหาตรงส่วนไหนก็ได้
-        const sql = `SELECT * FROM user WHERE name LIKE ? ORDER BY name ASC`;
-        const searchValue = `%${name}%`; // ใส่ % เพื่อค้นหาตรงไหนก็ได้
+  try {
+    // ใช้ LIKE %...% เพื่อค้นหาตรงส่วนไหนก็ได้
+    const sql = `SELECT * FROM user WHERE name LIKE ? ORDER BY name ASC`;
+    const searchValue = `%${name}%`; // ใส่ % เพื่อค้นหาตรงไหนก็ได้
 
-        conn.query(sql, [searchValue], (err, results) => {
-            if (err) {
-                console.error('[Search Users] DB error:', err);
-                return res.status(500).json({ error: 'Database error' });
-            }
+    conn.query(sql, [searchValue], (err, results) => {
+      if (err) {
+        console.error('[Search Users] DB error:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
 
-            if (results.length === 0) {
-                return res.status(404).json({ message: 'ไม่พบผู้ใช้ที่ค้นหา' });
-            }
+      if (results.length === 0) {
+        return res.status(404).json({ message: 'ไม่พบผู้ใช้ที่ค้นหา' });
+      }
 
-            res.status(200).json(results);
-        });
-    } catch (err) {
-        console.error(err);
-        return res.status(500).json({ error: 'Server error' });
-    }
+      res.status(200).json(results);
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Server error' });
+  }
 });
 
