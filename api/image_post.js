@@ -1202,6 +1202,85 @@ router.put('/notification/read/:notification_id', (req, res) => {
   });
 });
 
+// --------------------------------------------
+// API POST /comment
+// เพิ่ม comment ลงโพสต์
+// --------------------------------------------
+router.post('/comment', (req, res) => {
+  const { user_id, post_id, comment_text } = req.body;
+
+  if (!user_id || !post_id || !comment_text) {
+    console.log('[Comment] Missing user_id, post_id, or comment_text');
+    return res.status(400).json({ error: 'user_id, post_id, and comment_text are required' });
+  }
+
+  const insertSql = 'INSERT INTO post_comments (post_id_fk, user_id_fk, comment_text) VALUES (?, ?, ?)';
+  conn.query(insertSql, [post_id, user_id, comment_text], (err, result) => {
+    if (err) {
+      console.log('[Comment] Insert failed:', err);
+      return res.status(500).json({ error: 'Comment insert failed' });
+    }
+
+    console.log(`[Comment] User ${user_id} commented on post ${post_id}`);
+    res.status(200).json({ message: 'Comment added', comment_id: result.insertId });
+  });
+});
+
+// --------------------------------------------
+// API POST /delete-comment
+// ลบ comment
+// --------------------------------------------
+router.post('/delete-comment', (req, res) => {
+  const { comment_id, user_id } = req.body;
+
+  if (!comment_id || !user_id) {
+    console.log('[Delete Comment] Missing comment_id or user_id');
+    return res.status(400).json({ error: 'comment_id and user_id are required' });
+  }
+
+  // ลบเฉพาะ comment ของผู้ใช้
+  const deleteSql = 'DELETE FROM post_comments WHERE comment_id = ? AND user_id_fk = ?';
+  conn.query(deleteSql, [comment_id, user_id], (err, result) => {
+    if (err) {
+      console.log('[Delete Comment] Failed:', err);
+      return res.status(500).json({ error: 'Delete comment failed' });
+    }
+
+    if (result.affectedRows === 0) {
+      console.log(`[Delete Comment] Comment not found or not owned by user ${user_id}`);
+      return res.status(404).json({ error: 'Comment not found or not yours' });
+    }
+
+    console.log(`[Delete Comment] User ${user_id} deleted comment ${comment_id}`);
+    res.status(200).json({ message: 'Comment deleted' });
+  });
+});
+
+// --------------------------------------------
+// API GET /comments/:post_id
+// ดึง comment ของโพสต์
+// --------------------------------------------
+router.get('/comments/:post_id', (req, res) => {
+  const { post_id } = req.params;
+
+  const sql = `
+    SELECT c.comment_id, c.comment_text, c.created_at, u.user_id, u.username
+    FROM post_comments c
+    JOIN user u ON c.user_id_fk = u.user_id
+    WHERE c.post_id_fk = ?
+    ORDER BY c.created_at ASC
+  `;
+
+  conn.query(sql, [post_id], (err, results) => {
+    if (err) {
+      console.log('[Get Comments] Query failed:', err);
+      return res.status(500).json({ error: 'Query failed' });
+    }
+
+    res.status(200).json({ comments: results });
+  });
+});
+
 
 
 
