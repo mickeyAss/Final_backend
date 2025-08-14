@@ -1264,7 +1264,13 @@ router.get('/comments/:post_id', (req, res) => {
   const { post_id } = req.params;
 
   const sql = `
-    SELECT c.comment_id, c.comment_text, c.created_at, u.uid, u.name
+    SELECT 
+      c.comment_id, 
+      c.comment_text, 
+      c.created_at, 
+      u.uid, 
+      u.name,
+      u.profile_image 
     FROM post_comments c
     JOIN user u ON c.user_id_fk = u.uid
     WHERE c.post_id_fk = ?
@@ -1280,6 +1286,7 @@ router.get('/comments/:post_id', (req, res) => {
     res.status(200).json({ comments: results });
   });
 });
+
 
 
 
