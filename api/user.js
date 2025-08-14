@@ -17,7 +17,9 @@ if (!admin.apps.length) {
 
 module.exports = router;
 
-// API: ดึงข้อมูล user ทั้งหมด (แบบสุ่ม)
+/* ----------------------- API: ดึงข้อมูลผู้ใช้ ----------------------- */
+
+// ดึงผู้ใช้ทั้งหมดแบบสุ่ม
 router.get("/get", (req, res) => {
   try {
     conn.query("SELECT * FROM user ORDER BY RAND()", (err, result) => {
@@ -36,7 +38,7 @@ router.get("/get", (req, res) => {
   }
 });
 
-// API: ดึง user ที่ไม่ใช่ตัวเองและยังไม่ได้ follow
+// ดึงผู้ใช้ที่ไม่ใช่ตัวเอง และยังไม่ได้ follow
 router.get("/users-except", (req, res) => {
   const loggedInUid = req.query.uid;
 
@@ -72,7 +74,7 @@ router.get("/users-except", (req, res) => {
   }
 });
 
-// API: เข้าสู่ระบบ (Login) โดยรองรับ Google Login และ Login ปกติ
+// เข้าสู่ระบบ (Login) รองรับทั้ง Google Login และ Login ปกติ
 router.post("/login", async (req, res) => {
   const { email, password, isGoogleLogin, idToken, name, profile_image } = req.body;
 
@@ -155,7 +157,7 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// API: สมัครสมาชิก (Register)
+// สมัครสมาชิก (Register) + บันทึกหมวดหมู่ที่เลือก
 router.post("/register", async (req, res) => {
   const {
     name, email, password,
@@ -225,7 +227,7 @@ router.post("/register", async (req, res) => {
   }
 });
 
-// API: ดึงข้อมูล user ตาม uid
+// ดึงข้อมูลผู้ใช้ตาม uid
 router.get("/get/:uid", (req, res) => {
   const uid = req.params.uid;
 
@@ -252,7 +254,9 @@ router.get("/get/:uid", (req, res) => {
   }
 });
 
-// API: follow user
+/* ----------------------- API: ระบบติดตาม (Follow) ----------------------- */
+
+// follow ผู้ใช้ + สร้างการแจ้งเตือนทั้งใน MySQL และ Firebase
 router.post("/follow", (req, res) => {
   const { follower_id, following_id } = req.body;
 
@@ -328,7 +332,7 @@ router.post("/follow", (req, res) => {
   });
 });
 
-// API: unfollow user
+// unfollow ผู้ใช้
 router.delete("/unfollow", (req, res) => {
   const { follower_id, following_id } = req.body;
 
@@ -354,7 +358,7 @@ router.delete("/unfollow", (req, res) => {
   });
 });
 
-// API: เช็คว่ากำลังติดตามหรือไม่
+// ตรวจสอบว่ากำลังติดตามอยู่หรือไม่
 router.get("/is-following", (req, res) => {
   const { follower_id, following_id } = req.query;
 
@@ -378,7 +382,7 @@ router.get("/is-following", (req, res) => {
   });
 });
 
-// API: จำนวน followers
+// นับจำนวน followers ของ user
 router.get("/followers-count/:uid", (req, res) => {
   const uid = req.params.uid;
 
@@ -393,7 +397,7 @@ router.get("/followers-count/:uid", (req, res) => {
   });
 });
 
-// API: จำนวน following
+// นับจำนวน following ของ user
 router.get("/following-count/:uid", (req, res) => {
   const uid = req.params.uid;
 
@@ -408,7 +412,9 @@ router.get("/following-count/:uid", (req, res) => {
   });
 });
 
-// API: ดึงการแจ้งเตือนพร้อมข้อมูลผู้ส่งและโพสต์ (ถ้ามี)
+/* ----------------------- API: การแจ้งเตือน (Notifications) ----------------------- */
+
+// ดึงรายการแจ้งเตือน พร้อมข้อมูลผู้ส่ง และข้อมูลโพสต์ (ถ้ามี)
 router.get('/notifications/:uid', (req, res) => {
   const receiver_uid = req.params.uid;
 
