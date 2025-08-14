@@ -79,22 +79,55 @@ router.post("/login", async (req, res) => {
   const { email, isGoogleLogin, idToken, name, profile_image, password } = req.body;
 
   try {
+    // ตรวจสอบข้อมูลพื้นฐาน
+    if (!email) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "กรุณาระบุอีเมล" 
+      });
+    }
+
     let finalEmail = email;
-    let finalName = name;
-    let finalProfileImage = profile_image;
+    let finalName = name || "";
+    let finalProfileImage = profile_image || "";
 
     // ตรวจสอบ Google Token
     if (isGoogleLogin) {
-      if (!idToken) return res.status(400).json({ error: "Google ID Token is required" });
+      if (!idToken) {
+        return res.status(400).json({ 
+          success: false, 
+          error: "ไม่พบ Google ID Token" 
+        });
+      }
+
       try {
         const decoded = await admin.auth().verifyIdToken(idToken);
+        
+        // ตรวจสอบว่าอีเมลได้รับการยืนยันแล้ว
+        if (!decoded.email_verified) {
+          return res.status(401).json({ 
+            success: false, 
+            error: "อีเมล Google ยังไม่ได้รับการยืนยัน" 
+          });
+        }
+
+        // ใช้ข้อมูลจาก Google Token
         finalEmail = decoded.email;
-        finalName = decoded.name || "";
-        finalProfileImage = decoded.picture || "";
-        console.log("✅ Google token verified:", decoded);
-      } catch (e) {
-        console.error("❌ Invalid Google ID Token:", e);
-        return res.status(401).json({ error: "Invalid Google ID Token" });
+        finalName = decoded.name || name || "";
+        finalProfileImage = decoded.picture || profile_image || "";
+        
+        console.log("✅ Google token verified successfully:", {
+          email: finalEmail,
+          name: finalName,
+          uid: decoded.uid
+        });
+
+      } catch (error) {
+        console.error("❌ Invalid Google ID Token:", error);
+        return res.status(401).json({ 
+          success: false, 
+          error: "Google Token ไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง"
+        });
       }
     }
 
@@ -107,45 +140,134 @@ router.post("/login", async (req, res) => {
     });
 
     let user;
+
     if (!results || results.length === 0) {
-      // สร้าง user ใหม่ สำหรับ Google login
-      if (!isGoogleLogin) return res.status(404).json({ error: "User not found" });
-
-      const insertResult = await new Promise((resolve, reject) => {
-        conn.query(
-          "INSERT INTO user (name, email, password, profile_image) VALUES (?, ?, ?, ?)",
-          [finalName, finalEmail, "", finalProfileImage],
-          (err, result) => (err ? reject(err) : resolve(result))
-        );
-      });
-
-      const newUserResults = await new Promise((resolve, reject) => {
-        conn.query("SELECT * FROM user WHERE uid = ?", [insertResult.insertId], (err, results) => {
-          if (err) reject(err);
-          else resolve(results);
+      // User ไม่พบในระบบ
+      if (!isGoogleLogin) {
+        return res.status(404).json({ 
+          success: false, 
+          error: "ไม่พบผู้ใช้งาน กรุณาสมัครสมาชิกก่อน" 
         });
-      });
+      }
 
-      user = newUserResults[0];
-      return res.status(200).json({ message: "Google login successful (new user)", user });
+      // สร้าง user ใหม่สำหรับ Google login
+      try {
+        const insertResult = await new Promise((resolve, reject) => {
+          conn.query(
+            "INSERT INTO user (name, email, password, profile_image) VALUES (?, ?, '', ?)",
+            [finalName, finalEmail, finalProfileImage],
+            (err, result) => (err ? reject(err) : resolve(result))
+          );
+        });
+
+        const newUserResults = await new Promise((resolve, reject) => {
+          conn.query("SELECT * FROM user WHERE uid = ?", [insertResult.insertId], (err, results) => {
+            if (err) reject(err);
+            else resolve(results);
+          });
+        });
+
+        user = newUserResults[0];
+
+        console.log("✅ สร้าง Google user ใหม่สำเร็จ:", {
+          uid: user.uid,
+          email: user.email,
+          name: user.name
+        });
+
+      } catch (dbError) {
+        console.error("❌ Database error while creating user:", dbError);
+        return res.status(500).json({ 
+          success: false, 
+          error: "ไม่สามารถสร้างบัญชีผู้ใช้ได้ กรุณาลองใหม่อีกครั้ง"
+        });
+      }
+
+    } else {
+      // User มีอยู่ในระบบแล้ว
+      user = results[0];
+
+      if (isGoogleLogin) {
+        // อัพเดทข้อมูลจาก Google (name และ profile_image)
+        try {
+          await new Promise((resolve, reject) => {
+            conn.query(
+              "UPDATE user SET name = ?, profile_image = ? WHERE uid = ?",
+              [finalName, finalProfileImage, user.uid],
+              (err, result) => (err ? reject(err) : resolve(result))
+            );
+          });
+          
+          // ดึงข้อมูล user ที่อัพเดทแล้ว
+          const updatedResults = await new Promise((resolve, reject) => {
+            conn.query("SELECT * FROM user WHERE uid = ?", [user.uid], (err, results) => {
+              if (err) reject(err);
+              else resolve(results);
+            });
+          });
+          
+          user = updatedResults[0];
+          
+        } catch (updateError) {
+          console.warn("⚠️ ไม่สามารถอัพเดทข้อมูล Google user:", updateError);
+          // ไม่ return error เพราะ login ยังสามารถทำได้
+        }
+
+      } else {
+        // Login ปกติ - ตรวจสอบรหัสผ่าน
+        if (!password) {
+          return res.status(400).json({ 
+            success: false, 
+            error: "กรุณาระบุรหัสผ่าน" 
+          });
+        }
+
+        // ตรวจสอบว่าเป็น Google account หรือไม่
+        if (!user.password || user.password === '') {
+          return res.status(401).json({ 
+            success: false, 
+            error: "บัญชีนี้ใช้การเข้าสู่ระบบผ่าน Google กรุณาใช้ Google เพื่อเข้าสู่ระบบ"
+          });
+        }
+
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+          return res.status(401).json({ 
+            success: false, 
+            error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" 
+          });
+        }
+      }
     }
 
-    user = results[0];
+    // เตรียมข้อมูล response (ไม่ส่งรหัสผ่านกลับ)
+    const responseUser = {
+      uid: user.uid,
+      name: user.name,
+      email: user.email,
+      profile_image: user.profile_image
+    };
 
-    if (isGoogleLogin) {
-      return res.status(200).json({ message: "Google login successful", user });
-    }
+    // Log สำหรับติดตาม
+    console.log("✅ Login สำเร็จ:", {
+      email: finalEmail,
+      loginType: isGoogleLogin ? 'Google' : 'Normal',
+      uid: user.uid
+    });
 
-    // login ปกติ
-    if (!password) return res.status(400).json({ error: "Password is required" });
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(401).json({ error: "Invalid password" });
+    // ส่ง response
+    res.status(200).json({
+      success: true,
+      message: isGoogleLogin ? "เข้าสู่ระบบด้วย Google สำเร็จ" : "เข้าสู่ระบบสำเร็จ",
+      user: responseUser
+    });
 
-    res.status(200).json({ message: "Login successful", user });
-
-  } catch (err) {
-    console.error("Login error:", err);
-    res.status(500).json({ error: err.message || "Server error" });
+  } catch (error) {
+    console.error("❌ Login error:", error);
+    res.status(500).json({
+      success: false,
+      error: "เกิดข้อผิดพลาดของเซิร์ฟเวอร์ กรุณาลองใหม่อีกครั้ง"
+    });
   }
 });
 
