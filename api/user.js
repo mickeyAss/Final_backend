@@ -539,3 +539,35 @@ router.get('/notifications/:uid', (req, res) => {
     });
   });
 });
+
+// ค้นหาผู้ใช้จากชื่อ
+router.get('/search-users', (req, res) => {
+    const { name } = req.query; // รับ query parameter เช่น /search-users?name=กร
+
+    if (!name) {
+        return res.status(400).json({ error: 'กรุณาระบุชื่อสำหรับค้นหา' });
+    }
+
+    try {
+        // ใช้ LIKE %...% เพื่อค้นหาตรงส่วนไหนก็ได้
+        const sql = `SELECT * FROM user WHERE name LIKE ? ORDER BY name ASC`;
+        const searchValue = `%${name}%`; // ใส่ % เพื่อค้นหาตรงไหนก็ได้
+
+        conn.query(sql, [searchValue], (err, results) => {
+            if (err) {
+                console.error('[Search Users] DB error:', err);
+                return res.status(500).json({ error: 'Database error' });
+            }
+
+            if (results.length === 0) {
+                return res.status(404).json({ message: 'ไม่พบผู้ใช้ที่ค้นหา' });
+            }
+
+            res.status(200).json(results);
+        });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ error: 'Server error' });
+    }
+});
+
