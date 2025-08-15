@@ -445,37 +445,6 @@ router.post('/post/add', async (req, res) => {
       });
     };
 
-    // Analyze images
-    const analyzeImages = async () => {
-      for (const imgUrl of images) {
-        try {
-          const [result] = await visionClient.labelDetection(imgUrl);
-          const labels = result.labelAnnotations;
-          let detectedLabels = labels.length ? labels.map(label => label.description).join(', ') : '';
-
-          let translatedText = detectedLabels;
-          if (detectedLabels.trim()) {
-            const [translation] = await translateClient.translate(detectedLabels, 'th');
-            translatedText = translation;
-          }
-
-          const sql = `
-            INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text, created_at)
-            VALUES (?, ?, ?, NOW())
-          `;
-
-          await new Promise((res, rej) => {
-            conn.query(sql, [insertedPostId, imgUrl, translatedText], (err) => {
-              if (err) rej(err);
-              else res();
-            });
-          });
-        } catch (error) {
-          console.error(`Error analyzing image ${imgUrl}:`, error);
-        }
-      }
-    };
-
     // Insert categories
     const insertCategories = () => {
       if (!Array.isArray(category_id_fk) || category_id_fk.length === 0) return Promise.resolve();
@@ -502,12 +471,11 @@ router.post('/post/add', async (req, res) => {
       });
     };
 
-    // รันทุกงานพร้อมกัน
+    // รันพร้อมกัน
     await Promise.all([
       insertImages(),
       insertCategories(),
-      insertPostHashtags(),
-      analyzeImages(),
+      insertPostHashtags()
     ]);
 
     return res.status(201).json({
