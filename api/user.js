@@ -11,7 +11,7 @@ const bcrypt = require('bcrypt'); // ต้องติดตั้งก่อ�
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
-    databaseURL: "https://final-project-2f65c-default-rtdb.firebaseio.com/" // แก้ให้ตรงกับ URL ของ Firebase Realtime Database ของคุณ
+    databaseURL: "https://final-project-2f65c-default-rtdb.firebaseio.com" // แก้ให้ตรงกับ URL ของ Firebase Realtime Database ของคุณ
   });
 }
 
@@ -75,97 +75,30 @@ router.get("/users-except", (req, res) => {
 });
 
 // เข้าสู่ระบบ (Login) รองรับทั้ง Google Login และ Login ปกติ
+// เข้าสู่ระบบ (Login) แบบปกติ
 router.post("/login", async (req, res) => {
-  const { email, password, isGoogleLogin, idToken, name, profile_image } = req.body;
+  const { email, password } = req.body;
 
   try {
-    let finalEmail = email;
-    let finalName = name;
-    let finalProfileImage = profile_image;
-
-    // ----- Google Login: ตรวจสอบ idToken -----
-    if (isGoogleLogin) {
-      if (!idToken) {
-        return res.status(400).json({ error: "Google ID Token is required" });
-      }
-
-      try {
-        const decoded = await admin.auth().verifyIdToken(idToken);
-        finalEmail = decoded.email;
-        finalName = decoded.name || "";
-        finalProfileImage = decoded.picture || "";
-        console.log("Google token verified:", decoded);
-      } catch (e) {
-        console.error("Google verifyIdToken error:", e);
-        return res.status(401).json({ error: "Invalid Google ID Token" });
-      }
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
     }
 
-    // ----- ค้นหา user ในฐานข้อมูล -----
+    // ค้นหา user ในฐานข้อมูล MySQL
     const results = await new Promise((resolve, reject) => {
-      conn.query("SELECT * FROM user WHERE email = ?", [finalEmail], (err, results) => {
-        if (err) {
-          console.error("MySQL query error:", err);
-          reject(err);
-        } else {
-          resolve(results);
-        }
+      conn.query("SELECT * FROM user WHERE email = ?", [email], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
       });
     });
 
-    let user;
     if (!results || results.length === 0) {
-      // ----- ไม่มี user → สร้างใหม่ (เฉพาะ Google Login) -----
-      if (!isGoogleLogin) {
-        return res.status(404).json({ error: "User not found" });
-      }
-
-      const insertResult = await new Promise((resolve, reject) => {
-        const sqlInsert = `
-          INSERT INTO user (name, email, password, profile_image)
-          VALUES (?, ?, ?, ?)
-        `;
-        conn.query(sqlInsert, [finalName, finalEmail, "", finalProfileImage], (err, result) => {
-          if (err) {
-            console.error("MySQL insert error:", err);
-            reject(err);
-          } else {
-            resolve(result);
-          }
-        });
-      });
-
-      if (!insertResult || !insertResult.insertId) {
-        return res.status(500).json({ error: "Failed to create new user" });
-      }
-
-      const newUserResults = await new Promise((resolve, reject) => {
-        conn.query("SELECT * FROM user WHERE uid = ?", [insertResult.insertId], (err, results) => {
-          if (err) {
-            console.error("MySQL fetch new user error:", err);
-            reject(err);
-          } else {
-            resolve(results);
-          }
-        });
-      });
-
-      user = newUserResults[0];
-      return res.status(200).json({ message: "Google login successful (new user)", user });
+      return res.status(404).json({ error: "User not found" });
     }
 
-    // ----- user มีในระบบแล้ว -----
-    user = results[0];
+    const user = results[0];
 
-    if (isGoogleLogin) {
-      return res.status(200).json({ message: "Google login successful", user });
-    }
-
-    // ----- login ปกติ: ตรวจสอบ password -----
-    if (!password) {
-      return res.status(400).json({ error: "Password is required" });
-    }
-
+    // ตรวจสอบ password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({ error: "Invalid password" });
@@ -175,9 +108,61 @@ router.post("/login", async (req, res) => {
 
   } catch (err) {
     console.error("Login error:", err);
-    res.status(500).json({ error: err.message || "Server error" });
+    res.status(500).json({ error: "Server error" });
   }
 });
+
+// เข้าสู่ระบบด้วย Google
+router.post("/login-google", async (req, res) => {
+  const { idToken } = req.body; // รับ idToken จาก client
+
+  if (!idToken) {
+    return res.status(400).json({ error: "Missing idToken" });
+  }
+
+  try {
+    // ตรวจสอบความถูกต้องของ idToken กับ Firebase
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const { uid, email, name, picture } = decodedToken;
+
+    // ตรวจสอบว่า user มีใน MySQL หรือยัง
+    const results = await new Promise((resolve, reject) => {
+      conn.query("SELECT * FROM user WHERE uid = ?", [uid], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+
+    let user;
+    if (results.length === 0) {
+      // ถ้า user ยังไม่มีในฐานข้อมูล MySQL ให้สร้างใหม่
+      const insertResult = await new Promise((resolve, reject) => {
+        const sql = "INSERT INTO user (uid, email, name, profile_image) VALUES (?, ?, ?, ?)";
+        conn.query(sql, [uid, email, name, picture], (err, result) => {
+          if (err) reject(err);
+          else resolve(result);
+        });
+      });
+
+      user = {
+        uid,
+        email,
+        name,
+        profile_image: picture,
+      };
+    } else {
+      // ถ้ามีแล้ว ให้ใช้ข้อมูลเดิม
+      user = results[0];
+    }
+
+    res.status(200).json({ message: "Google login successful", user });
+
+  } catch (err) {
+    console.error("Google login error:", err);
+    res.status(401).json({ error: "Invalid Google token" });
+  }
+});
+
 
 
 // สมัครสมาชิก (Register) + บันทึกหมวดหมู่ที่เลือก
@@ -185,7 +170,6 @@ router.post("/register", async (req, res) => {
   const {
     name, email, password,
     personal_description,
-    height, weight, shirt_size, chest, waist_circumference, hip, // เพิ่มฟิลด์ใหม่
     category_ids // เป็น array เช่น [1, 2, 3]
   } = req.body;
 
@@ -208,21 +192,14 @@ router.post("/register", async (req, res) => {
     const sqlInsertUser = `
       INSERT INTO user (
         name, email, password,
-        personal_description, profile_image,
-        height, weight, shirt_size, chest, waist_circumference, hip
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        personal_description, profile_image
+      ) VALUES (?, ?, ?, ?, ?)
     `;
 
     const userValues = [
       name, email, hashedPassword,
       personal_description,
-      defaultProfileImage,
-      height || null,
-      weight || null,
-      shirt_size || null,
-      chest || null,
-      waist_circumference || null,
-      hip || null
+      defaultProfileImage
     ];
 
     conn.query(sqlInsertUser, userValues, (err, result) => {
@@ -257,7 +234,6 @@ router.post("/register", async (req, res) => {
     return res.status(500).json({ error: 'เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์' });
   }
 });
-
 
 // ดึงข้อมูลผู้ใช้ตาม uid
 router.get("/get/:uid", (req, res) => {
@@ -571,35 +547,3 @@ router.get('/notifications/:uid', (req, res) => {
     });
   });
 });
-
-// ค้นหาผู้ใช้จากชื่อ
-router.get('/search-users', (req, res) => {
-  const { name } = req.query; // รับ query parameter เช่น /search-users?name=กร
-
-  if (!name) {
-    return res.status(400).json({ error: 'กรุณาระบุชื่อสำหรับค้นหา' });
-  }
-
-  try {
-    // ใช้ LIKE %...% เพื่อค้นหาตรงส่วนไหนก็ได้
-    const sql = `SELECT * FROM user WHERE name LIKE ? ORDER BY name ASC`;
-    const searchValue = `%${name}%`; // ใส่ % เพื่อค้นหาตรงไหนก็ได้
-
-    conn.query(sql, [searchValue], (err, results) => {
-      if (err) {
-        console.error('[Search Users] DB error:', err);
-        return res.status(500).json({ error: 'Database error' });
-      }
-
-      if (results.length === 0) {
-        return res.status(404).json({ message: 'ไม่พบผู้ใช้ที่ค้นหา' });
-      }
-
-      res.status(200).json(results);
-    });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Server error' });
-  }
-});
-
