@@ -548,10 +548,11 @@ router.get('/notifications/:uid', (req, res) => {
   });
 });
 
+// 🔍 Search user by name (ทั้งบางส่วนและเต็ม)
 router.get("/search-user", (req, res) => {
-  const { query } = req.query;
+  const { name } = req.query;  // 👈 ใช้ name แทน query
 
-  if (!query || query.trim() === "") {
+  if (!name || name.trim() === "") {
     return res.status(400).json({ error: "Search query is required" });
   }
 
@@ -562,16 +563,16 @@ router.get("/search-user", (req, res) => {
       WHERE name LIKE ? OR name = ?
       ORDER BY name ASC
     `;
-    const searchValue = `%${query}%`;
+    const searchValue = `%${name}%`;
 
-    conn.query(sql, [searchValue, query], (err, results) => {
+    conn.query(sql, [searchValue, name], (err, results) => {
       if (err) {
         console.error("[Search User] DB error:", err);
         return res.status(500).json({ error: "Database query error" });
       }
 
       if (results.length === 0) {
-        return res.status(404).json({ message: "No users found" });
+        return res.status(200).json([]); // 👈 ให้ส่ง [] แทน error 404
       }
 
       return res.status(200).json(results);
