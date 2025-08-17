@@ -115,24 +115,25 @@ router.post("/login", async (req, res) => {
 // เข้าสู่ระบบด้วย Google
 // ✅ Google Login
 router.post("/login-google", async (req, res) => {
-  const { idToken } = req.body; // ได้จาก Flutter (Firebase ID Token)
+  const { idToken } = req.body;
 
   if (!idToken) {
     return res.status(400).json({ error: "Missing idToken" });
   }
 
   try {
-    // ✅ ตรวจสอบความถูกต้องของ Firebase ID Token
+    // ตรวจสอบความถูกต้องของ Firebase ID Token
     const decodedToken = await admin.auth().verifyIdToken(idToken);
-    const { uid, email, name, picture } = decodedToken;
+    const { email, name, picture } = decodedToken;
 
     if (!email) {
       return res.status(400).json({ error: "No email in Google account" });
     }
 
-    // ✅ ตรวจสอบว่า user มีใน MySQL หรือยัง (ใช้ email แทน)
+    // ตรวจสอบว่ามี user ใน MySQL หรือยัง
     const results = await new Promise((resolve, reject) => {
-      conn.query("SELECT * FROM user WHERE email = ?", [email], (err, results) => {
+      const sql = "SELECT * FROM user WHERE email = ?";
+      conn.query(sql, [email], (err, results) => {
         if (err) reject(err);
         else resolve(results);
       });
@@ -141,10 +142,10 @@ router.post("/login-google", async (req, res) => {
     let user;
 
     if (results.length === 0) {
-      // ถ้ายังไม่มี → เพิ่มใหม่
+      // ถ้ายังไม่มี → insert ใหม่
       const insertResult = await new Promise((resolve, reject) => {
         const sql = `
-          INSERT INTO user (email, name, profile_image) 
+          INSERT INTO user (email, name, profile_image)
           VALUES (?, ?, ?)
         `;
         conn.query(sql, [email, name || "ไม่ระบุ", picture || null], (err, result) => {
@@ -153,32 +154,44 @@ router.post("/login-google", async (req, res) => {
         });
       });
 
-      user = {
-        id: insertResult.insertId, // id auto increment
-        email,
-        name,
-        profile_image: picture,
-      };
+      // ใช้ข้อมูลจาก MySQL หลัง insert
+      const [newUser] = await new Promise((resolve, reject) => {
+        conn.query("SELECT * FROM user WHERE id = ?", [insertResult.insertId], (err, results) => {
+          if (err) reject(err);
+          else resolve(results);
+        });
+      });
+
+      user = newUser;
     } else {
       // ถ้ามีแล้ว → ใช้ข้อมูลเก่า
       user = results[0];
 
-      // ✅ อัปเดตข้อมูลล่าสุดจาก Google (กันกรณีชื่อหรือรูปเปลี่ยน)
+      // อัปเดต name/profile_image ล่าสุดจาก Google
       await new Promise((resolve, reject) => {
         const sql = `
-          UPDATE user 
+          UPDATE user
           SET name = ?, profile_image = ?
           WHERE email = ?
         `;
-        conn.query(sql, [name, picture, email], (err) => {
+        conn.query(sql, [name || user.name, picture || user.profile_image, email], (err) => {
           if (err) reject(err);
           else resolve();
         });
       });
+
+      // ดึงข้อมูลล่าสุดหลัง update
+      const [updatedUser] = await new Promise((resolve, reject) => {
+        conn.query("SELECT * FROM user WHERE email = ?", [email], (err, results) => {
+          if (err) reject(err);
+          else resolve(results);
+        });
+      });
+
+      user = updatedUser;
     }
 
     res.status(200).json({ message: "Google login successful", user });
-
   } catch (err) {
     console.error("Google login error:", err);
     res.status(401).json({ error: "Invalid Firebase token" });
