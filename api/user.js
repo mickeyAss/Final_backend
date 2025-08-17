@@ -77,78 +77,14 @@ router.get("/users-except", (req, res) => {
 
 // เข้าสู่ระบบ (Login) แบบปกติ
 router.post("/login", async (req, res) => {
-  const { email, password, isGoogleLogin, idToken } = req.body;
+  const { email, password } = req.body;
 
   try {
-    // Login ด้วย Google
-    if (isGoogleLogin) {
-      const { OAuth2Client } = require("google-auth-library");
-      const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
-
-      const ticket = await client.verifyIdToken({
-        idToken,
-        audience: process.env.GOOGLE_CLIENT_ID,
-      });
-
-      const payload = ticket.getPayload();
-      if (!payload) {
-        return res.status(401).json({ error: "Invalid Google token" });
-      }
-
-      // ดึง email จาก Google payload
-      const googleEmail = payload.email;
-      const name = payload.name;
-      const profile_image = payload.picture;
-
-      // ตรวจสอบใน MySQL
-      const results = await new Promise((resolve, reject) => {
-        conn.query(
-          "SELECT * FROM user WHERE email = ?",
-          [googleEmail],
-          (err, results) => {
-            if (err) reject(err);
-            else resolve(results);
-          }
-        );
-      });
-
-      let user;
-      if (results.length === 0) {
-        // สร้าง user ใหม่
-        const insertResult = await new Promise((resolve, reject) => {
-          conn.query(
-            "INSERT INTO user (email, name, profile_image) VALUES (?, ?, ?)",
-            [googleEmail, name, profile_image],
-            (err, result) => {
-              if (err) reject(err);
-              else resolve(result);
-            }
-          );
-        });
-
-        user = {
-          uid: insertResult.insertId, // ใช้ uid จาก MySQL
-          email: googleEmail,
-          name,
-          profile_image,
-        };
-      } else {
-        user = {
-          uid: results[0].uid, // uid จาก MySQL
-          email: results[0].email,
-          name: results[0].name,
-          profile_image: results[0].profile_image,
-        };
-      }
-
-      return res.status(200).json({ message: "Google login successful", user });
-    }
-
-    // Login ปกติ
     if (!email || !password) {
       return res.status(400).json({ error: "Email and password are required" });
     }
 
+    // ค้นหา user ในฐานข้อมูล MySQL
     const results = await new Promise((resolve, reject) => {
       conn.query("SELECT * FROM user WHERE email = ?", [email], (err, results) => {
         if (err) reject(err);
@@ -156,28 +92,77 @@ router.post("/login", async (req, res) => {
       });
     });
 
-    if (results.length === 0) {
+    if (!results || results.length === 0) {
       return res.status(404).json({ error: "User not found" });
     }
 
     const user = results[0];
+
+    // ตรวจสอบ password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({ error: "Invalid password" });
     }
 
-    res.status(200).json({ message: "Login successful", user: {
-      uid: user.uid, // uid จาก MySQL
-      email: user.email,
-      name: user.name,
-      profile_image: user.profile_image
-    }});
+    res.status(200).json({ message: "Login successful", user });
 
   } catch (err) {
     console.error("Login error:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
+
+// เข้าสู่ระบบด้วย Google
+router.post("/login-google", async (req, res) => {
+  const { idToken } = req.body; // ได้จาก Flutter (Firebase ID Token)
+
+  if (!idToken) {
+    return res.status(400).json({ error: "Missing idToken" });
+  }
+
+  try {
+    // ✅ ตรวจสอบความถูกต้องของ Firebase ID Token
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const { uid, email, name, picture } = decodedToken;
+
+    // ✅ ตรวจสอบว่า user มีใน MySQL หรือยัง
+    const results = await new Promise((resolve, reject) => {
+      conn.query("SELECT * FROM user WHERE uid = ?", [uid], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+
+    let user;
+    if (results.length === 0) {
+      // ถ้ายังไม่มี → เพิ่มใหม่
+      const insertResult = await new Promise((resolve, reject) => {
+        const sql =
+          "INSERT INTO user (uid, email, name, profile_image) VALUES (?, ?, ?, ?)";
+        conn.query(sql, [uid, email, name, picture], (err, result) => {
+          if (err) reject(err);
+          else resolve(result);
+        });
+      });
+
+      user = {
+        uid,
+        email,
+        name,
+        profile_image: picture,
+      };
+    } else {
+      // ถ้ามีแล้ว → ใช้ข้อมูลเก่า
+      user = results[0];
+    }
+
+    res.status(200).json({ message: "Google login successful", user });
+  } catch (err) {
+    console.error("Google login error:", err);
+    res.status(401).json({ error: "Invalid Firebase token" });
+  }
+});
+
 
 
 // สมัครสมาชิก (Register) + บันทึกหมวดหมู่ที่เลือก
@@ -598,4 +583,3 @@ router.get("/search-user", (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 });
-
