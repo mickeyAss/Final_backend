@@ -547,3 +547,37 @@ router.get('/notifications/:uid', (req, res) => {
     });
   });
 });
+
+router.get("/search-user", (req, res) => {
+  const { query } = req.query;
+
+  if (!query || query.trim() === "") {
+    return res.status(400).json({ error: "Search query is required" });
+  }
+
+  try {
+    const sql = `
+      SELECT uid, name, email, profile_image, personal_description
+      FROM user
+      WHERE name LIKE ? OR name = ?
+      ORDER BY name ASC
+    `;
+    const searchValue = `%${query}%`;
+
+    conn.query(sql, [searchValue, query], (err, results) => {
+      if (err) {
+        console.error("[Search User] DB error:", err);
+        return res.status(500).json({ error: "Database query error" });
+      }
+
+      if (results.length === 0) {
+        return res.status(404).json({ message: "No users found" });
+      }
+
+      return res.status(200).json(results);
+    });
+  } catch (err) {
+    console.error("[Search User] Server error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
