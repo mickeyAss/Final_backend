@@ -80,14 +80,8 @@ router.post("/login", async (req, res) => {
   const { email, password, isGoogleLogin, idToken } = req.body;
 
   try {
-    if (!email) {
-      return res.status(400).json({ error: "Email is required" });
-    }
-
-    // หากเป็น Google Login
+    // Login ด้วย Google
     if (isGoogleLogin) {
-      // TODO: ตรวจสอบ idToken กับ Google
-      // ตัวอย่าง: ใช้ google-auth-library เพื่อตรวจสอบ
       const { OAuth2Client } = require("google-auth-library");
       const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -101,43 +95,58 @@ router.post("/login", async (req, res) => {
         return res.status(401).json({ error: "Invalid Google token" });
       }
 
-      // ดึงข้อมูล user จาก DB
+      // ดึง email จาก Google payload
+      const googleEmail = payload.email;
+      const name = payload.name;
+      const profile_image = payload.picture;
+
+      // ตรวจสอบใน MySQL
       const results = await new Promise((resolve, reject) => {
-        conn.query("SELECT * FROM user WHERE email = ?", [email], (err, results) => {
-          if (err) reject(err);
-          else resolve(results);
-        });
+        conn.query(
+          "SELECT * FROM user WHERE email = ?",
+          [googleEmail],
+          (err, results) => {
+            if (err) reject(err);
+            else resolve(results);
+          }
+        );
       });
 
       let user;
       if (results.length === 0) {
-        // ถ้า user ไม่มีใน DB -> สร้าง user ใหม่
+        // สร้าง user ใหม่
         const insertResult = await new Promise((resolve, reject) => {
           conn.query(
             "INSERT INTO user (email, name, profile_image) VALUES (?, ?, ?)",
-            [email, payload.name, payload.picture],
+            [googleEmail, name, profile_image],
             (err, result) => {
               if (err) reject(err);
               else resolve(result);
             }
           );
         });
+
         user = {
-          id: insertResult.insertId,
-          email,
-          name: payload.name,
-          profile_image: payload.picture,
+          uid: insertResult.insertId, // ใช้ uid จาก MySQL
+          email: googleEmail,
+          name,
+          profile_image,
         };
       } else {
-        user = results[0];
+        user = {
+          uid: results[0].uid, // uid จาก MySQL
+          email: results[0].email,
+          name: results[0].name,
+          profile_image: results[0].profile_image,
+        };
       }
 
-      return res.status(200).json({ message: "Login successful", user });
+      return res.status(200).json({ message: "Google login successful", user });
     }
 
     // Login ปกติ
-    if (!password) {
-      return res.status(400).json({ error: "Password is required" });
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
     }
 
     const results = await new Promise((resolve, reject) => {
@@ -152,13 +161,17 @@ router.post("/login", async (req, res) => {
     }
 
     const user = results[0];
-
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({ error: "Invalid password" });
     }
 
-    res.status(200).json({ message: "Login successful", user });
+    res.status(200).json({ message: "Login successful", user: {
+      uid: user.uid, // uid จาก MySQL
+      email: user.email,
+      name: user.name,
+      profile_image: user.profile_image
+    }});
 
   } catch (err) {
     console.error("Login error:", err);
