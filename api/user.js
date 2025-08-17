@@ -113,6 +113,7 @@ router.post("/login", async (req, res) => {
 });
 
 // เข้าสู่ระบบด้วย Google
+// ✅ Google Login
 router.post("/login-google", async (req, res) => {
   const { idToken } = req.body; // ได้จาก Flutter (Firebase ID Token)
 
@@ -125,28 +126,35 @@ router.post("/login-google", async (req, res) => {
     const decodedToken = await admin.auth().verifyIdToken(idToken);
     const { uid, email, name, picture } = decodedToken;
 
-    // ✅ ตรวจสอบว่า user มีใน MySQL หรือยัง
+    if (!email) {
+      return res.status(400).json({ error: "No email in Google account" });
+    }
+
+    // ✅ ตรวจสอบว่า user มีใน MySQL หรือยัง (ใช้ email แทน)
     const results = await new Promise((resolve, reject) => {
-      conn.query("SELECT * FROM user WHERE uid = ?", [uid], (err, results) => {
+      conn.query("SELECT * FROM user WHERE email = ?", [email], (err, results) => {
         if (err) reject(err);
         else resolve(results);
       });
     });
 
     let user;
+
     if (results.length === 0) {
       // ถ้ายังไม่มี → เพิ่มใหม่
       const insertResult = await new Promise((resolve, reject) => {
-        const sql =
-          "INSERT INTO user (uid, email, name, profile_image) VALUES (?, ?, ?, ?)";
-        conn.query(sql, [uid, email, name, picture], (err, result) => {
+        const sql = `
+          INSERT INTO user (email, name, profile_image) 
+          VALUES (?, ?, ?)
+        `;
+        conn.query(sql, [email, name || "ไม่ระบุ", picture || null], (err, result) => {
           if (err) reject(err);
           else resolve(result);
         });
       });
 
       user = {
-        uid,
+        id: insertResult.insertId, // id auto increment
         email,
         name,
         profile_image: picture,
@@ -154,9 +162,23 @@ router.post("/login-google", async (req, res) => {
     } else {
       // ถ้ามีแล้ว → ใช้ข้อมูลเก่า
       user = results[0];
+
+      // ✅ อัปเดตข้อมูลล่าสุดจาก Google (กันกรณีชื่อหรือรูปเปลี่ยน)
+      await new Promise((resolve, reject) => {
+        const sql = `
+          UPDATE user 
+          SET name = ?, profile_image = ?
+          WHERE email = ?
+        `;
+        conn.query(sql, [name, picture, email], (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
     }
 
     res.status(200).json({ message: "Google login successful", user });
+
   } catch (err) {
     console.error("Google login error:", err);
     res.status(401).json({ error: "Invalid Firebase token" });
