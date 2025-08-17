@@ -179,58 +179,6 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// เข้าสู่ระบบด้วย Google
-router.post("/login-google", async (req, res) => {
-  const { idToken } = req.body; // ได้จาก Flutter (Firebase ID Token)
-
-  if (!idToken) {
-    return res.status(400).json({ error: "Missing idToken" });
-  }
-
-  try {
-    // ✅ ตรวจสอบความถูกต้องของ Firebase ID Token
-    const decodedToken = await admin.auth().verifyIdToken(idToken);
-    const { uid, email, name, picture } = decodedToken;
-
-    // ✅ ตรวจสอบว่า user มีใน MySQL หรือยัง
-    const results = await new Promise((resolve, reject) => {
-      conn.query("SELECT * FROM user WHERE uid = ?", [uid], (err, results) => {
-        if (err) reject(err);
-        else resolve(results);
-      });
-    });
-
-    let user;
-    if (results.length === 0) {
-      // ถ้ายังไม่มี → เพิ่มใหม่
-      const insertResult = await new Promise((resolve, reject) => {
-        const sql =
-          "INSERT INTO user (uid, email, name, profile_image) VALUES (?, ?, ?, ?)";
-        conn.query(sql, [uid, email, name, picture], (err, result) => {
-          if (err) reject(err);
-          else resolve(result);
-        });
-      });
-
-      user = {
-        uid,
-        email,
-        name,
-        profile_image: picture,
-      };
-    } else {
-      // ถ้ามีแล้ว → ใช้ข้อมูลเก่า
-      user = results[0];
-    }
-
-    res.status(200).json({ message: "Google login successful", user });
-  } catch (err) {
-    console.error("Google login error:", err);
-    res.status(401).json({ error: "Invalid Firebase token" });
-  }
-});
-
-
 
 // สมัครสมาชิก (Register) + บันทึกหมวดหมู่ที่เลือก
 router.post("/register", async (req, res) => {
@@ -617,31 +565,32 @@ router.get('/notifications/:uid', (req, res) => {
 
 // 🔍 Search user by name (ทั้งบางส่วนและเต็ม)
 router.get("/search-user", (req, res) => {
-  const { name } = req.query;  // 👈 ใช้ name แทน query
+  const { name, uid } = req.query;  // 👈 ดึง uid มาด้วย
 
   if (!name || name.trim() === "") {
     return res.status(400).json({ error: "Search query is required" });
+  }
+  if (!uid) {
+    return res.status(400).json({ error: "User uid is required" });
   }
 
   try {
     const sql = `
       SELECT uid, name, email, profile_image, personal_description
       FROM user
-      WHERE name LIKE ? OR name = ?
+      WHERE (name LIKE ? OR name = ?)
+        AND uid != ?   -- 👈 กรองไม่เอาตัวเอง
       ORDER BY name ASC
     `;
     const searchValue = `%${name}%`;
 
-    conn.query(sql, [searchValue, name], (err, results) => {
+    conn.query(sql, [searchValue, name, uid], (err, results) => {
       if (err) {
         console.error("[Search User] DB error:", err);
         return res.status(500).json({ error: "Database query error" });
       }
 
-      if (results.length === 0) {
-        return res.status(200).json([]); // 👈 ให้ส่ง [] แทน error 404
-      }
-
+      // ส่ง [] แทน error เวลาไม่เจอ
       return res.status(200).json(results);
     });
   } catch (err) {
@@ -649,3 +598,4 @@ router.get("/search-user", (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 });
+
