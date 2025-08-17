@@ -74,17 +74,72 @@ router.get("/users-except", (req, res) => {
   }
 });
 
-// เข้าสู่ระบบ (Login) รองรับทั้ง Google Login และ Login ปกติ
+
 // เข้าสู่ระบบ (Login) แบบปกติ
 router.post("/login", async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, isGoogleLogin, idToken } = req.body;
 
   try {
-    if (!email || !password) {
-      return res.status(400).json({ error: "Email and password are required" });
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" });
     }
 
-    // ค้นหา user ในฐานข้อมูล MySQL
+    // หากเป็น Google Login
+    if (isGoogleLogin) {
+      // TODO: ตรวจสอบ idToken กับ Google
+      // ตัวอย่าง: ใช้ google-auth-library เพื่อตรวจสอบ
+      const { OAuth2Client } = require("google-auth-library");
+      const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+      const ticket = await client.verifyIdToken({
+        idToken,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+
+      const payload = ticket.getPayload();
+      if (!payload) {
+        return res.status(401).json({ error: "Invalid Google token" });
+      }
+
+      // ดึงข้อมูล user จาก DB
+      const results = await new Promise((resolve, reject) => {
+        conn.query("SELECT * FROM user WHERE email = ?", [email], (err, results) => {
+          if (err) reject(err);
+          else resolve(results);
+        });
+      });
+
+      let user;
+      if (results.length === 0) {
+        // ถ้า user ไม่มีใน DB -> สร้าง user ใหม่
+        const insertResult = await new Promise((resolve, reject) => {
+          conn.query(
+            "INSERT INTO user (email, name, profile_image) VALUES (?, ?, ?)",
+            [email, payload.name, payload.picture],
+            (err, result) => {
+              if (err) reject(err);
+              else resolve(result);
+            }
+          );
+        });
+        user = {
+          id: insertResult.insertId,
+          email,
+          name: payload.name,
+          profile_image: payload.picture,
+        };
+      } else {
+        user = results[0];
+      }
+
+      return res.status(200).json({ message: "Login successful", user });
+    }
+
+    // Login ปกติ
+    if (!password) {
+      return res.status(400).json({ error: "Password is required" });
+    }
+
     const results = await new Promise((resolve, reject) => {
       conn.query("SELECT * FROM user WHERE email = ?", [email], (err, results) => {
         if (err) reject(err);
@@ -92,13 +147,12 @@ router.post("/login", async (req, res) => {
       });
     });
 
-    if (!results || results.length === 0) {
+    if (results.length === 0) {
       return res.status(404).json({ error: "User not found" });
     }
 
     const user = results[0];
 
-    // ตรวจสอบ password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({ error: "Invalid password" });
