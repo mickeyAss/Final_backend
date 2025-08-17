@@ -113,7 +113,6 @@ router.post("/login", async (req, res) => {
 });
 
 // เข้าสู่ระบบด้วย Google
-// ✅ Google Login
 router.post("/login-google", async (req, res) => {
   const { idToken } = req.body;
 
@@ -122,7 +121,7 @@ router.post("/login-google", async (req, res) => {
   }
 
   try {
-    // ตรวจสอบความถูกต้องของ Firebase ID Token
+    // ตรวจสอบ Firebase ID Token
     const decodedToken = await admin.auth().verifyIdToken(idToken);
     const { email, name, picture } = decodedToken;
 
@@ -130,7 +129,7 @@ router.post("/login-google", async (req, res) => {
       return res.status(400).json({ error: "No email in Google account" });
     }
 
-    // ตรวจสอบว่ามี user ใน MySQL หรือยัง
+    // ตรวจสอบว่า user มีใน MySQL หรือยัง
     const results = await new Promise((resolve, reject) => {
       const sql = "SELECT * FROM user WHERE email = ?";
       conn.query(sql, [email], (err, results) => {
@@ -145,7 +144,7 @@ router.post("/login-google", async (req, res) => {
       // ถ้ายังไม่มี → insert ใหม่
       const insertResult = await new Promise((resolve, reject) => {
         const sql = `
-          INSERT INTO user (email, name, profile_image)
+          INSERT INTO user (email, name, profile_image) 
           VALUES (?, ?, ?)
         `;
         conn.query(sql, [email, name || "ไม่ระบุ", picture || null], (err, result) => {
@@ -154,33 +153,44 @@ router.post("/login-google", async (req, res) => {
         });
       });
 
-      // ใช้ข้อมูลจาก MySQL หลัง insert
+      // ดึงข้อมูล user หลัง insert
       const [newUser] = await new Promise((resolve, reject) => {
-        conn.query("SELECT * FROM user WHERE id = ?", [insertResult.insertId], (err, results) => {
+        conn.query("SELECT * FROM user WHERE uid = ?", [insertResult.insertId], (err, results) => {
           if (err) reject(err);
           else resolve(results);
         });
       });
 
-      user = newUser;
-    } else {
-      // ถ้ามีแล้ว → ใช้ข้อมูลเก่า
-      user = results[0];
+      // แปลง field ให้ตรง Flutter
+      user = {
+        uid: newUser.uid,
+        name: newUser.name,
+        email: newUser.email,
+        profile_image: newUser.profile_image,
+        personal_description: newUser.personal_description,
+        height: newUser.height,
+        weight: newUser.weight,
+        shirt_size: newUser.shirt_size,
+        chest: newUser.chest,
+        waist_circumference: newUser.waist_circumference,
+        hip: newUser.hip,
+      };
 
-      // อัปเดต name/profile_image ล่าสุดจาก Google
+    } else {
+      // ถ้ามีแล้ว → ใช้ข้อมูลเก่า + อัปเดตล่าสุดจาก Google
       await new Promise((resolve, reject) => {
         const sql = `
           UPDATE user
           SET name = ?, profile_image = ?
           WHERE email = ?
         `;
-        conn.query(sql, [name || user.name, picture || user.profile_image, email], (err) => {
+        conn.query(sql, [name || results[0].name, picture || results[0].profile_image, email], (err) => {
           if (err) reject(err);
           else resolve();
         });
       });
 
-      // ดึงข้อมูลล่าสุดหลัง update
+      // ดึงข้อมูลล่าสุด
       const [updatedUser] = await new Promise((resolve, reject) => {
         conn.query("SELECT * FROM user WHERE email = ?", [email], (err, results) => {
           if (err) reject(err);
@@ -188,10 +198,23 @@ router.post("/login-google", async (req, res) => {
         });
       });
 
-      user = updatedUser;
+      user = {
+        uid: updatedUser.uid,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        profile_image: updatedUser.profile_image,
+        personal_description: updatedUser.personal_description,
+        height: updatedUser.height,
+        weight: updatedUser.weight,
+        shirt_size: updatedUser.shirt_size,
+        chest: updatedUser.chest,
+        waist_circumference: updatedUser.waist_circumference,
+        hip: updatedUser.hip,
+      };
     }
 
     res.status(200).json({ message: "Google login successful", user });
+
   } catch (err) {
     console.error("Google login error:", err);
     res.status(401).json({ error: "Invalid Firebase token" });
