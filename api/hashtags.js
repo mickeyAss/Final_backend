@@ -142,37 +142,51 @@ router.get("/hashtags-with-posts", (req, res) => {
         conn.query(postHashtagSql, (err, postHashtags) => {
           if (err) return res.status(400).json({ error: 'Post-Hashtag query error' });
 
-          // รวมข้อมูล: hashtag -> posts
-          const result = hashtags.map(tag => {
-            // หา post_id ที่เกี่ยวกับ tag นี้
-            const relatedPostIds = postHashtags
-              .filter(ph => ph.hashtag_id_fk === tag.tag_id)
-              .map(ph => ph.post_id_fk);
+          // ดึงรูปภาพทั้งหมด
+          const imageSql = `SELECT * FROM image_post`;
+          conn.query(imageSql, (err, images) => {
+            if (err) return res.status(400).json({ error: 'Image query error' });
 
-            // หาโพสต์ที่ตรงกับ post_id เหล่านี้
-            const relatedPosts = posts
-              .filter(p => relatedPostIds.includes(p.post_id))
-              .map(p => ({
-                post_id: p.post_id,
-                post_topic: p.post_topic,
-                post_description: p.post_description,
-                post_fk_uid: p.post_fk_uid,
-                post_date: p.post_date,
-                user: {
-                  uid: p.uid,
-                  name: p.name,
-                  email: p.email
-                }
-              }));
+            // รวมข้อมูล: hashtag -> posts -> images
+            const result = hashtags.map(tag => {
+              // หา post_id ที่เกี่ยวกับ tag นี้
+              const relatedPostIds = postHashtags
+                .filter(ph => ph.hashtag_id_fk === tag.tag_id)
+                .map(ph => ph.post_id_fk);
 
-            return {
-              tag_id: tag.tag_id,
-              tag_name: tag.tag_name,
-              posts: relatedPosts
-            };
+              // หาโพสต์ที่ตรงกับ post_id เหล่านี้
+              const relatedPosts = posts
+                .filter(p => relatedPostIds.includes(p.post_id))
+                .map(p => {
+                  // หา images ของโพสต์นี้
+                  const postImages = images
+                    .filter(img => img.image_fk_postid === p.post_id)
+                    .map(img => img.image); // เอา URL ของรูป
+
+                  return {
+                    post_id: p.post_id,
+                    post_topic: p.post_topic,
+                    post_description: p.post_description,
+                    post_fk_uid: p.post_fk_uid,
+                    post_date: p.post_date,
+                    user: {
+                      uid: p.uid,
+                      name: p.name,
+                      email: p.email
+                    },
+                    images: postImages // <-- เพิ่มตรงนี้
+                  };
+                });
+
+              return {
+                tag_id: tag.tag_id,
+                tag_name: tag.tag_name,
+                posts: relatedPosts
+              };
+            });
+
+            res.status(200).json(result);
           });
-
-          res.status(200).json(result);
         });
       });
     });
@@ -181,7 +195,6 @@ router.get("/hashtags-with-posts", (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
-
 
 
 
