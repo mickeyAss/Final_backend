@@ -228,7 +228,9 @@ router.post("/register", async (req, res) => {
   const {
     name, email, password,
     personal_description,
-    category_ids // เป็น array เช่น [1, 2, 3]
+    category_ids, // เป็น array เช่น [1, 2, 3]
+    height, weight, shirt_size,
+    chest, waist_circumference, hip
   } = req.body;
 
   const defaultProfileImage = 'https://firebasestorage.googleapis.com/v0/b/final-project-2f65c.firebasestorage.app/o/final_image%2Favatar.png?alt=media&token=8c81feb3-eeaa-44c5-bbfa-342d40a92333';
@@ -250,14 +252,22 @@ router.post("/register", async (req, res) => {
     const sqlInsertUser = `
       INSERT INTO user (
         name, email, password,
-        personal_description, profile_image
-      ) VALUES (?, ?, ?, ?, ?)
+        personal_description, profile_image,
+        height, weight, shirt_size,
+        chest, waist_circumference, hip
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const userValues = [
       name, email, hashedPassword,
       personal_description,
-      defaultProfileImage
+      defaultProfileImage,
+      height || null,
+      weight || null,
+      shirt_size || null,
+      chest || null,
+      waist_circumference || null,
+      hip || null
     ];
 
     conn.query(sqlInsertUser, userValues, (err, result) => {
@@ -292,6 +302,7 @@ router.post("/register", async (req, res) => {
     return res.status(500).json({ error: 'เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์' });
   }
 });
+
 
 // ดึงข้อมูลผู้ใช้ตาม uid
 router.get("/get/:uid", (req, res) => {
