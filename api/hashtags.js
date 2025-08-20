@@ -309,11 +309,11 @@ router.get("/hashtag-posts", (req, res) => {
             .status(404)
             .json({ error: "ไม่มีโพสต์ที่ใช้ hashtag นี้" });
 
-        // 3. ดึงโพสต์ทั้งหมด พร้อมข้อมูล user
+        // 3. ดึงโพสต์ทั้งหมด พร้อมข้อมูล user (รวม profile_image)
         const postSql = `
           SELECT 
             p.post_id, p.post_topic, p.post_description, p.post_date, p.post_fk_uid,
-            u.uid, u.name, u.email
+            u.uid, u.name, u.email, u.profile_image
           FROM post p
           JOIN user u ON p.post_fk_uid = u.uid
           WHERE p.post_id IN (?)
@@ -329,7 +329,7 @@ router.get("/hashtag-posts", (req, res) => {
             if (err)
               return res.status(400).json({ error: "Image query error" });
 
-            // 5. รวมข้อมูลโพสต์ + รูป
+            // 5. รวมข้อมูลโพสต์ + รูป + user profile image
             const result = posts.map((p) => {
               const postImages = images
                 .filter((img) => img.image_fk_postid === p.post_id)
@@ -345,6 +345,7 @@ router.get("/hashtag-posts", (req, res) => {
                   uid: p.uid,
                   name: p.name,
                   email: p.email,
+                  profile_image: p.profile_image || null, // เพิ่มตรงนี้
                 },
                 images: postImages,
               };
