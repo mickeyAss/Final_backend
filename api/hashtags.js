@@ -196,6 +196,91 @@ router.get("/hashtags-with-posts", (req, res) => {
   }
 });
 
+// ค้นหาโพสต์ด้วย hashtag
+router.get("/search-hashtag", (req, res) => {
+  try {
+    const q = req.query.q?.trim();
+    if (!q || q === "#") {
+      return res.status(400).json({ error: "กรุณาใส่ hashtag" });
+    }
+
+    // 1. หา tag_id ของ hashtag ที่ค้นหา
+    const hashtagSql = "SELECT * FROM hashtags WHERE tag_name = ?";
+    conn.query(hashtagSql, [q], (err, hashtagResults) => {
+      if (err) return res.status(400).json({ error: "Hashtag query error" });
+      if (hashtagResults.length === 0)
+        return res.status(404).json({ error: "ไม่พบ hashtag นี้" });
+
+      const tagId = hashtagResults[0].tag_id;
+
+      // 2. หาโพสต์ที่ผูกกับ tag นี้
+      const postHashtagSql =
+        "SELECT post_id_fk FROM post_hashtags WHERE hashtag_id_fk = ?";
+      conn.query(postHashtagSql, [tagId], (err, postHashtags) => {
+        if (err)
+          return res.status(400).json({ error: "Post-Hashtag query error" });
+        if (postHashtags.length === 0)
+          return res.status(404).json({ error: "ไม่มีโพสต์ที่ใช้ hashtag นี้" });
+
+        const postIds = postHashtags.map((ph) => ph.post_id_fk);
+        if (postIds.length === 0) {
+          return res
+            .status(404)
+            .json({ error: "ไม่มีโพสต์ที่ใช้ hashtag นี้" });
+        }
+
+        // 3. ดึงโพสต์ทั้งหมด พร้อมข้อมูล user
+        const postSql = `
+          SELECT 
+            post.*, 
+            user.uid, user.name, user.email
+          FROM post
+          JOIN user ON post.post_fk_uid = user.uid
+          WHERE post.post_id IN (?)
+        `;
+        conn.query(postSql, [postIds], (err, posts) => {
+          if (err) return res.status(400).json({ error: "Post query error" });
+
+          // 4. ดึงรูปภาพทั้งหมดที่เกี่ยวข้อง
+          const imageSql =
+            "SELECT * FROM image_post WHERE image_fk_postid IN (?)";
+          conn.query(imageSql, [postIds], (err, images) => {
+            if (err) return res.status(400).json({ error: "Image query error" });
+
+            // 5. รวมข้อมูลโพสต์ + รูป
+            const result = posts.map((p) => {
+              const postImages = images
+                .filter((img) => img.image_fk_postid === p.post_id)
+                .map((img) => img.image);
+
+              return {
+                post_id: p.post_id,
+                post_topic: p.post_topic,
+                post_description: p.post_description,
+                post_fk_uid: p.post_fk_uid,
+                post_date: p.post_date,
+                user: {
+                  uid: p.uid,
+                  name: p.name,
+                  email: p.email,
+                },
+                images: postImages,
+              };
+            });
+
+            res.status(200).json({
+              hashtag: hashtagResults[0],
+              posts: result,
+            });
+          });
+        });
+      });
+    });
+  } catch (err) {
+    console.error("Server error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
 
 
 
