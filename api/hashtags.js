@@ -282,6 +282,89 @@ router.get("/search-hashtag", (req, res) => {
   }
 });
 
+router.get("/hashtag-posts", (req, res) => {
+  try {
+    const tagId = parseInt(req.query.tag_id);
+    if (!tagId) {
+      return res.status(400).json({ error: "กรุณาส่ง tag_id" });
+    }
+
+    // 1. ตรวจสอบ hashtag
+    const hashtagSql = "SELECT * FROM hashtags WHERE tag_id = ?";
+    conn.query(hashtagSql, [tagId], (err, hashtagResults) => {
+      if (err) return res.status(400).json({ error: "Hashtag query error" });
+      if (hashtagResults.length === 0)
+        return res.status(404).json({ error: "ไม่พบ hashtag นี้" });
+
+      // 2. หาโพสต์ที่ผูกกับ tag นี้
+      const postHashtagSql =
+        "SELECT post_id_fk FROM post_hashtags WHERE hashtag_id_fk = ?";
+      conn.query(postHashtagSql, [tagId], (err, postHashtags) => {
+        if (err)
+          return res.status(400).json({ error: "Post-Hashtag query error" });
+
+        const postIds = postHashtags.map((ph) => ph.post_id_fk);
+        if (postIds.length === 0)
+          return res
+            .status(404)
+            .json({ error: "ไม่มีโพสต์ที่ใช้ hashtag นี้" });
+
+        // 3. ดึงโพสต์ทั้งหมด พร้อมข้อมูล user
+        const postSql = `
+          SELECT 
+            p.post_id, p.post_topic, p.post_description, p.post_date, p.post_fk_uid,
+            u.uid, u.name, u.email
+          FROM post p
+          JOIN user u ON p.post_fk_uid = u.uid
+          WHERE p.post_id IN (?)
+          ORDER BY p.post_date DESC
+        `;
+        conn.query(postSql, [postIds], (err, posts) => {
+          if (err) return res.status(400).json({ error: "Post query error" });
+
+          // 4. ดึงรูปภาพทั้งหมดที่เกี่ยวข้อง
+          const imageSql =
+            "SELECT * FROM image_post WHERE image_fk_postid IN (?)";
+          conn.query(imageSql, [postIds], (err, images) => {
+            if (err)
+              return res.status(400).json({ error: "Image query error" });
+
+            // 5. รวมข้อมูลโพสต์ + รูป
+            const result = posts.map((p) => {
+              const postImages = images
+                .filter((img) => img.image_fk_postid === p.post_id)
+                .map((img) => img.image);
+
+              return {
+                post_id: p.post_id,
+                post_topic: p.post_topic,
+                post_description: p.post_description,
+                post_date: p.post_date,
+                post_fk_uid: p.post_fk_uid,
+                user: {
+                  uid: p.uid,
+                  name: p.name,
+                  email: p.email,
+                },
+                images: postImages,
+              };
+            });
+
+            res.status(200).json({
+              hashtag: hashtagResults[0],
+              total_posts: result.length,
+              posts: result,
+            });
+          });
+        });
+      });
+    });
+  } catch (err) {
+    console.error("Server error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 
 
 
