@@ -178,77 +178,77 @@ router.post("/post/search", (req, res) => {
         new Promise((resolve, reject) => conn.query(likeSql, (err, results) => err ? reject(err) : resolve(results))),
         new Promise((resolve, reject) => conn.query(labelSql, [`%${keyword}%`], (err, results) => err ? reject(err) : resolve(results)))
       ])
-      .then(([imageResults, categoryResults, hashtagResults, likeResults, labelResults]) => {
-        const likeMap = {};
-        likeResults.forEach(item => {
-          likeMap[item.post_id] = item.like_count;
-        });
-
-        // แปลง post_id ของ label ให้เป็น set เพื่อ filter post
-        const matchedPostIds = new Set(labelResults.map(l => l.post_id_fk));
-
-        const postsWithData = postResults
-          .filter(post => matchedPostIds.has(post.post_id)) // filter ตาม keyword Vision API
-          .map(post => {
-            const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
-            const categories = categoryResults
-              .filter(cat => cat.post_id_fk === post.post_id)
-              .map(cat => ({
-                cid: cat.cid,
-                cname: cat.cname,
-                cimage: cat.cimage,
-                ctype: cat.ctype
-              }));
-            const hashtags = hashtagResults
-              .filter(ht => ht.post_id_fk === post.post_id)
-              .map(ht => ({
-                tag_id: ht.tag_id,
-                tag_name: ht.tag_name
-              }));
-            const visionLabels = labelResults
-              .filter(l => l.post_id_fk === post.post_id)
-              .map(l => JSON.parse(l.analysis_text))
-              .flat();
-
-            return {
-              post: {
-                post_id: post.post_id,
-                post_topic: post.post_topic,
-                post_description: post.post_description,
-                post_date: post.post_date,
-                post_fk_cid: post.post_fk_cid,
-                post_fk_uid: post.post_fk_uid,
-                post_status: post.post_status,
-                amount_of_like: likeMap[post.post_id] || 0,
-                amount_of_save: post.amount_of_save || 0,
-                amount_of_comment: post.amount_of_comment || 0,
-              },
-              user: {
-                uid: post.uid,
-                name: post.name,
-                email: post.email,
-                personal_description: post.personal_description,
-                profile_image: post.profile_image,
-                height: post.height,
-                weight: post.weight,
-                shirt_size: post.shirt_size,
-                chest: post.chest,
-                waist_circumference: post.waist_circumference,
-                hip: post.hip
-              },
-              images,
-              categories,
-              hashtags,
-              visionLabels
-            };
+        .then(([imageResults, categoryResults, hashtagResults, likeResults, labelResults]) => {
+          const likeMap = {};
+          likeResults.forEach(item => {
+            likeMap[item.post_id] = item.like_count;
           });
 
-        res.status(200).json(postsWithData);
-      })
-      .catch(err => {
-        console.error(err);
-        res.status(500).json({ error: 'Server error' });
-      });
+          // แปลง post_id ของ label ให้เป็น set เพื่อ filter post
+          const matchedPostIds = new Set(labelResults.map(l => l.post_id_fk));
+
+          const postsWithData = postResults
+            .filter(post => matchedPostIds.has(post.post_id)) // filter ตาม keyword Vision API
+            .map(post => {
+              const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
+              const categories = categoryResults
+                .filter(cat => cat.post_id_fk === post.post_id)
+                .map(cat => ({
+                  cid: cat.cid,
+                  cname: cat.cname,
+                  cimage: cat.cimage,
+                  ctype: cat.ctype
+                }));
+              const hashtags = hashtagResults
+                .filter(ht => ht.post_id_fk === post.post_id)
+                .map(ht => ({
+                  tag_id: ht.tag_id,
+                  tag_name: ht.tag_name
+                }));
+              const visionLabels = labelResults
+                .filter(l => l.post_id_fk === post.post_id)
+                .map(l => JSON.parse(l.analysis_text))
+                .flat();
+
+              return {
+                post: {
+                  post_id: post.post_id,
+                  post_topic: post.post_topic,
+                  post_description: post.post_description,
+                  post_date: post.post_date,
+                  post_fk_cid: post.post_fk_cid,
+                  post_fk_uid: post.post_fk_uid,
+                  post_status: post.post_status,
+                  amount_of_like: likeMap[post.post_id] || 0,
+                  amount_of_save: post.amount_of_save || 0,
+                  amount_of_comment: post.amount_of_comment || 0,
+                },
+                user: {
+                  uid: post.uid,
+                  name: post.name,
+                  email: post.email,
+                  personal_description: post.personal_description,
+                  profile_image: post.profile_image,
+                  height: post.height,
+                  weight: post.weight,
+                  shirt_size: post.shirt_size,
+                  chest: post.chest,
+                  waist_circumference: post.waist_circumference,
+                  hip: post.hip
+                },
+                images,
+                categories,
+                hashtags,
+                visionLabels
+              };
+            });
+
+          res.status(200).json(postsWithData);
+        })
+        .catch(err => {
+          console.error(err);
+          res.status(500).json({ error: 'Server error' });
+        });
 
     });
   } catch (err) {
@@ -531,7 +531,7 @@ const vision = require('@google-cloud/vision');
 const { Translate } = require('@google-cloud/translate').v2;
 
 const translateClient = new Translate({
-  keyFilename: 'D:/Project Appication/final_project_backend/practical-now-465814-r5-2d95bf6ba8d7.json', 
+  keyFilename: 'D:/Project Appication/final_project_backend/practical-now-465814-r5-2d95bf6ba8d7.json',
   projectId: 'practical-now-465814-r5',
 });
 
@@ -566,34 +566,37 @@ router.post('/post/add', async (req, res) => {
 
     const insertedPostId = postResult.insertId;
 
-    // วิเคราะห์ภาพ → labelDetection + แปลไทย
     const analyzeImages = async () => {
       const results = [];
+
       for (const imageUrl of images) {
         try {
           const [visionResult] = await visionClient.labelDetection({
             image: { source: { imageUri: imageUrl } },
           });
 
-          const labels = [];
-          for (const label of visionResult.labelAnnotations) {
-            const description = label.description;
+          const topLabels = visionResult.labelAnnotations.slice(0, 5);
 
-            // ✅ แปลไทย
-            const [translation] = await translateClient.translate(description, 'th');
-
-            labels.push({
-              en: description,
-              th: translation
-            });
-          }
+          const labels = await Promise.all(
+            topLabels.map(async (label) => {
+              const description = label.description;
+              try {
+                const [translation] = await translateClient.translate(description, 'th');
+                return { en: description, th: translation };
+              } catch (e) {
+                console.error('Translate error for', description, e.message);
+                return { en: description, th: '' };
+              }
+            })
+          );
 
           results.push({ image: imageUrl, labels });
         } catch (err) {
-          console.error('Error analyzing image', imageUrl, err);
+          console.error('Vision error for', imageUrl, err.message);
           results.push({ image: imageUrl, labels: [], error: err.message });
         }
       }
+
       return results;
     };
 
@@ -1349,9 +1352,9 @@ router.put('/notification/read/:notification_id', (req, res) => {
 // POST /comment
 router.post('/comment', (req, res) => {
   const { user_id, post_id, comment_text } = req.body;
-  
+
   console.log('[Comment] Request body:', req.body);
-  
+
   if (!user_id || !post_id || !comment_text) {
     console.log('[Comment] Missing user_id, post_id, or comment_text');
     return res.status(400).json({ error: 'user_id, post_id, and comment_text are required' });
@@ -1362,52 +1365,52 @@ router.post('/comment', (req, res) => {
     INSERT INTO post_comments (user_id_fk, post_id_fk, comment_text)
     VALUES (?, ?, ?)
   `;
-  
+
   conn.query(insertSql, [user_id, post_id, comment_text], (err, result) => {
     if (err) {
       console.log('[Comment] Insert comment failed:', err);
       return res.status(500).json({ error: 'Comment insert failed' });
     }
-    
+
     const comment_id = result.insertId;
     console.log(`[Comment] User ${user_id} commented on post ${post_id} (comment_id: ${comment_id})`);
-    
+
     // 2️⃣ หาว่าเจ้าของโพสต์เป็นใคร
     const ownerSql = 'SELECT post_fk_uid FROM post WHERE post_id = ?';
-    
+
     console.log('[Comment] Querying post owner for post_id:', post_id);
-    
+
     conn.query(ownerSql, [post_id], (err2, ownerResult) => {
       if (err2) {
         console.log('[Comment] Get post owner failed:', err2);
         return res.status(500).json({ error: 'Get post owner failed' });
       }
-      
+
       console.log('[Comment] Post owner query result:', ownerResult);
-      
+
       if (ownerResult.length > 0) {
         const receiver_uid = ownerResult[0].post_fk_uid;
-        
+
         console.log('[Comment] Post owner (receiver_uid):', receiver_uid);
         console.log('[Comment] Comment author (user_id):', user_id);
         console.log('[Comment] Should create notification?', receiver_uid !== user_id);
-        
+
         // ไม่ส่ง notification ถ้าเจ้าของโพสต์คอมเมนต์ตัวเอง
         if (receiver_uid !== user_id) {
           const message = 'ได้คอมเมนต์โพสต์ของคุณ';
-          
+
           console.log('[Comment] Creating notification...');
-          
+
           // 🔹 Insert notification ลง MySQL
           const notifSql = `
             INSERT INTO notifications (sender_uid, receiver_uid, post_id, type, message, is_read)
             VALUES (?, ?, ?, 'comment', ?, 0)
           `;
-          
+
           const notifValues = [user_id, receiver_uid, post_id, message];
           console.log('[Comment] Notification SQL:', notifSql);
           console.log('[Comment] Notification values:', notifValues);
-          
+
           conn.query(notifSql, notifValues, (err3, result3) => {
             if (err3) {
               console.log('[Comment] Notification insert failed (MySQL):', err3);
@@ -1422,7 +1425,7 @@ router.post('/comment', (req, res) => {
               console.log('[Comment] Insert result:', result3);
             }
           });
-          
+
           // 🔹 Insert notification ลง Firebase Realtime Database
           const notifData = {
             sender_uid: user_id,
@@ -1433,10 +1436,10 @@ router.post('/comment', (req, res) => {
             is_read: false,
             created_at: admin.database.ServerValue.TIMESTAMP
           };
-          
+
           const db = admin.database();
           const notifRef = db.ref('notifications').push();
-          
+
           notifRef.set(notifData)
             .then(() => {
               console.log('[Comment] ✅ Notification added to Firebase with key:', notifRef.key);
@@ -1444,18 +1447,18 @@ router.post('/comment', (req, res) => {
             .catch((firebaseErr) => {
               console.log('[Comment] Firebase notification insert failed:', firebaseErr);
             });
-            
+
         } else {
           console.log('[Comment] 🚫 Skipping notification - user commented on own post');
         }
       } else {
         console.log('[Comment] ⚠️  No post found with post_id:', post_id);
       }
-      
+
       // ส่ง response กลับ
       console.log('[Comment] Sending response...');
-      res.status(200).json({ 
-        message: 'Comment added', 
+      res.status(200).json({
+        message: 'Comment added',
         comment_id: comment_id,
         debug: {
           user_id,
