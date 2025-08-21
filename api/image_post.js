@@ -552,7 +552,7 @@ router.post('/post/add', async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields: post_fk_uid or images' });
     }
 
-    // Insert Post
+    // Insert post
     const insertPostSql = `
       INSERT INTO post (post_topic, post_description, post_date, post_fk_uid, post_status)
       VALUES (?, ?, NOW(), ?, ?)
@@ -563,48 +563,45 @@ router.post('/post/add', async (req, res) => {
         else resolve(result);
       });
     });
+
     const insertedPostId = postResult.insertId;
 
-    // Function analyze image → label + translate
+    // Analyze images safely
     const analyzeImages = async () => {
       const results = [];
-
       for (const imageUrl of images) {
         try {
           const [visionResult] = await visionClient.labelDetection({
             image: { source: { imageUri: imageUrl } },
           });
 
-          // Limit top 5 labels
-          const topLabels = visionResult.labelAnnotations.slice(0, 5);
+          const topLabels = (visionResult.labelAnnotations || []).slice(0, 5); // Limit top 5
+          const labels = [];
 
-          // Translate all labels in parallel
-          const labels = await Promise.all(
-            topLabels.map(async (label) => {
-              const description = label.description;
-              try {
-                const [translation] = await translateClient.translate(description, 'th');
-                return { en: description, th: translation };
-              } catch (e) {
-                console.error('Translate error for', description, e.message);
-                return { en: description, th: '' };
-              }
-            })
-          );
+          for (const label of topLabels) {
+            const description = label.description || '';
+            let translation = '';
+            try {
+              const [translated] = await translateClient.translate(description, 'th');
+              translation = translated || '';
+            } catch (err) {
+              console.error('Translate error:', err);
+            }
+            labels.push({ en: description, th: translation });
+          }
 
           results.push({ image: imageUrl, labels });
         } catch (err) {
-          console.error('Vision error for', imageUrl, err.message);
+          console.error('Vision analyze error:', err);
           results.push({ image: imageUrl, labels: [], error: err.message });
         }
       }
-
       return results;
     };
 
     const visionResults = await analyzeImages();
 
-    // Insert image analysis into DB
+    // Insert analysis results
     const insertImageAnalysis = () => {
       if (!visionResults.length) return Promise.resolve();
       const insertSql = `
@@ -614,7 +611,7 @@ router.post('/post/add', async (req, res) => {
       const values = visionResults.map(vr => [
         insertedPostId,
         vr.image,
-        JSON.stringify(vr.labels), // store JSON
+        JSON.stringify(vr.labels || []),
         new Date()
       ]);
       return new Promise((resolve, reject) => {
@@ -651,16 +648,10 @@ router.post('/post/add', async (req, res) => {
       });
     };
 
-    // Run all inserts in parallel
-    await Promise.all([
-      insertImageAnalysis(),
-      insertCategories(),
-      insertPostHashtags()
-    ]);
+    await Promise.all([insertImageAnalysis(), insertCategories(), insertPostHashtags()]);
 
-    // Response
     return res.status(201).json({
-      message: 'Post created successfully with image analysis (top 5 labels + Thai)',
+      message: 'Post created with image analysis successfully',
       post_id: insertedPostId,
       post_status,
       visionResults
@@ -668,7 +659,7 @@ router.post('/post/add', async (req, res) => {
 
   } catch (error) {
     console.error('Error in /post/add:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
