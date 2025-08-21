@@ -393,49 +393,48 @@ router.get('/saved-posts/:user_id', (req, res) => {
 // เพิ่มโพสต์พร้อมรูปภาพ, หมวดหมู่ และแฮชแท็ก
 // --------------------------------------------
 
+router.use(express.json({ limit: '50mb' })); // รองรับ Base64 ขนาดใหญ่
+const axios = require('axios');
+const sharp = require('sharp');
+require('dotenv').config();  // ต้องอยู่บนสุด
 const vision = require('@google-cloud/vision');
 const { Translate } = require('@google-cloud/translate').v2;
 
-const translateClient = new Translate({
-  keyFilename: 'D:/Project Appication/final_project_backend/practical-now-465814-r5-2d95bf6ba8d7.json', 
-  projectId: 'practical-now-465814-r5',
-});
+// Google credentials from JSON env
+const visionCreds = JSON.parse(process.env.GOOGLE_VISION_CREDENTIALS_JSON);
+const translateCreds = JSON.parse(process.env.GOOGLE_TRANSLATE_CREDENTIALS_JSON);
 
-// สร้าง client ของ Google Vision
-const visionClient = new vision.ImageAnnotatorClient({
-  keyFilename: 'D:/Project Appication/final_project_backend/practical-now-465814-r5-fc7948fa14db.json',
-});
+const visionClient = new vision.ImageAnnotatorClient({ credentials: visionCreds });
+const translateClient = new Translate({ credentials: translateCreds, projectId: translateCreds.project_id });
 
+// POST /post/add
 router.post('/post/add', async (req, res) => {
   try {
     let { post_topic, post_description, post_fk_uid, images, category_id_fk, hashtags, post_status } = req.body;
     post_topic = post_topic?.trim() || null;
     post_description = post_description?.trim() || null;
-    post_status = (post_status && post_status.toLowerCase() === 'friends') ? 'friends' : 'public';
+    post_status = (post_status?.toLowerCase() === 'friends') ? 'friends' : 'public';
 
-    if (!post_fk_uid || !Array.isArray(images)) {
-      return res.status(400).json({ error: 'Missing required fields: post_fk_uid or images' });
+    if (!post_fk_uid || !Array.isArray(images) || images.length === 0) {
+      return res.status(400).json({ error: 'Missing required fields' });
     }
 
     // Insert post
-    const insertPostSql = `
-      INSERT INTO post (post_topic, post_description, post_date, post_fk_uid, post_status)
-      VALUES (?, ?, NOW(), ?, ?)
-    `;
     const postResult = await new Promise((resolve, reject) => {
-      conn.query(insertPostSql, [post_topic, post_description, post_fk_uid, post_status], (err, result) => {
-        if (err) reject(err);
-        else resolve(result);
-      });
+      const sql = `INSERT INTO post (post_topic, post_description, post_date, post_fk_uid, post_status) VALUES (?, ?, NOW(), ?, ?)`;
+      conn.query(sql, [post_topic, post_description, post_fk_uid, post_status], (err, result) => err ? reject(err) : resolve(result));
     });
 
     const insertedPostId = postResult.insertId;
 
     // วิเคราะห์ภาพ
     const visionResults = [];
-    for (const imageUrl of images) {
+    for (const img of images) {
       try {
-        const [visionResult] = await visionClient.labelDetection({ image: { source: { imageUri: imageUrl } } });
+        // ถ้า Base64: { content: "..." } หรือ URL: { source: { imageUri: img } }
+        const request = img.startsWith('http') ? { image: { source: { imageUri: img } } } : { image: { content: img } };
+
+        const [visionResult] = await visionClient.labelDetection(request);
 
         const labels = [];
         for (const label of visionResult.labelAnnotations) {
@@ -443,75 +442,47 @@ router.post('/post/add', async (req, res) => {
           const [translation] = await translateClient.translate(description, 'th');
           labels.push({ en: description, th: translation });
         }
-
-        visionResults.push({ image: imageUrl, labels });
+        visionResults.push({ image: img, labels });
       } catch (err) {
-        console.error('Error analyzing image', imageUrl, err);
-        visionResults.push({ image: imageUrl, labels: [], error: err.message });
+        console.error('Error analyzing image', err);
+        visionResults.push({ image: img, labels: [], error: err.message });
       }
     }
 
     // Insert image_post
-    const insertImagePostSql = `
-      INSERT INTO image_post (image, image_fk_postid)
-      VALUES ?
-    `;
-    const imagePostValues = images.map(imgUrl => [imgUrl, insertedPostId]);
-    await new Promise((resolve, reject) => {
-      conn.query(insertImagePostSql, [imagePostValues], (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
+    if (images.length > 0) {
+      const sql = `INSERT INTO image_post (image, image_fk_postid) VALUES ?`;
+      const values = images.map(img => [img, insertedPostId]);
+      await new Promise((resolve, reject) => conn.query(sql, [values], (err) => err ? reject(err) : resolve()));
+    }
 
     // Insert post_image_analysis
-    const insertAnalysisSql = `
-      INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text, created_at)
-      VALUES ?
-    `;
-    const analysisValues = visionResults.map(vr => [
-      insertedPostId,
-      vr.image,
-      JSON.stringify(vr.labels),
-      new Date()
-    ]);
-    await new Promise((resolve, reject) => {
-      conn.query(insertAnalysisSql, [analysisValues], (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
+    if (visionResults.length > 0) {
+      const sql = `INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text, created_at) VALUES ?`;
+      const values = visionResults.map(vr => [insertedPostId, vr.image, JSON.stringify(vr.labels), new Date()]);
+      await new Promise((resolve, reject) => conn.query(sql, [values], (err) => err ? reject(err) : resolve()));
+    }
 
     // Insert categories
     if (Array.isArray(category_id_fk) && category_id_fk.length > 0) {
-      const insertCategorySql = `INSERT INTO post_category (category_id_fk, post_id_fk) VALUES ?`;
-      const categoryValues = category_id_fk.map(catId => [catId, insertedPostId]);
-      await new Promise((resolve, reject) => {
-        conn.query(insertCategorySql, [categoryValues], (err) => err ? reject(err) : resolve());
-      });
+      const sql = `INSERT INTO post_category (category_id_fk, post_id_fk) VALUES ?`;
+      const values = category_id_fk.map(cid => [cid, insertedPostId]);
+      await new Promise((resolve, reject) => conn.query(sql, [values], (err) => err ? reject(err) : resolve()));
     }
 
     // Insert hashtags
     if (Array.isArray(hashtags) && hashtags.length > 0) {
-      const insertHashtagSql = `INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?`;
-      const hashtagValues = hashtags.map(tagId => [insertedPostId, tagId]);
-      await new Promise((resolve, reject) => {
-        conn.query(insertHashtagSql, [hashtagValues], (err) => err ? reject(err) : resolve());
-      });
+      const sql = `INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?`;
+      const values = hashtags.map(tagId => [insertedPostId, tagId]);
+      await new Promise((resolve, reject) => conn.query(sql, [values], (err) => err ? reject(err) : resolve()));
     }
 
-    return res.status(201).json({
-      message: 'Post, images, analysis, categories, hashtags inserted successfully',
-      post_id: insertedPostId,
-      visionResults
-    });
-
+    res.status(201).json({ message: 'Post created', post_id: insertedPostId, visionResults });
   } catch (error) {
-    console.error('Error in /post/add:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 
 // --------------------------------------------
 // API GET /by-user/:uid
