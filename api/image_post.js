@@ -548,11 +548,11 @@ router.post('/post/add', async (req, res) => {
     post_description = post_description?.trim() || null;
     post_status = (post_status && post_status.toLowerCase() === 'friends') ? 'friends' : 'public';
 
-    if (!post_fk_uid || !Array.isArray(images)) {
+    if (!post_fk_uid || !Array.isArray(images) || images.length === 0) {
       return res.status(400).json({ error: 'Missing required fields: post_fk_uid or images' });
     }
 
-    // Insert post
+    // Insert Post
     const insertPostSql = `
       INSERT INTO post (post_topic, post_description, post_date, post_fk_uid, post_status)
       VALUES (?, ?, NOW(), ?, ?)
@@ -563,9 +563,9 @@ router.post('/post/add', async (req, res) => {
         else resolve(result);
       });
     });
-
     const insertedPostId = postResult.insertId;
 
+    // Function analyze image → label + translate
     const analyzeImages = async () => {
       const results = [];
 
@@ -575,8 +575,10 @@ router.post('/post/add', async (req, res) => {
             image: { source: { imageUri: imageUrl } },
           });
 
+          // Limit top 5 labels
           const topLabels = visionResult.labelAnnotations.slice(0, 5);
 
+          // Translate all labels in parallel
           const labels = await Promise.all(
             topLabels.map(async (label) => {
               const description = label.description;
@@ -602,7 +604,7 @@ router.post('/post/add', async (req, res) => {
 
     const visionResults = await analyzeImages();
 
-    // Insert ลง DB
+    // Insert image analysis into DB
     const insertImageAnalysis = () => {
       if (!visionResults.length) return Promise.resolve();
       const insertSql = `
@@ -612,7 +614,7 @@ router.post('/post/add', async (req, res) => {
       const values = visionResults.map(vr => [
         insertedPostId,
         vr.image,
-        JSON.stringify(vr.labels), // เก็บ en + th เป็น JSON
+        JSON.stringify(vr.labels), // store JSON
         new Date()
       ]);
       return new Promise((resolve, reject) => {
@@ -623,7 +625,7 @@ router.post('/post/add', async (req, res) => {
       });
     };
 
-    // insert categories & hashtags
+    // Insert categories
     const insertCategories = () => {
       if (!Array.isArray(category_id_fk) || category_id_fk.length === 0) return Promise.resolve();
       const insertCategorySql = `INSERT INTO post_category (category_id_fk, post_id_fk) VALUES ?`;
@@ -636,6 +638,7 @@ router.post('/post/add', async (req, res) => {
       });
     };
 
+    // Insert hashtags
     const insertPostHashtags = () => {
       if (!Array.isArray(hashtags) || hashtags.length === 0) return Promise.resolve();
       const insertPostHashtagSql = `INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?`;
@@ -648,15 +651,16 @@ router.post('/post/add', async (req, res) => {
       });
     };
 
+    // Run all inserts in parallel
     await Promise.all([
       insertImageAnalysis(),
       insertCategories(),
       insertPostHashtags()
     ]);
 
-    // ส่งกลับ Flutter
+    // Response
     return res.status(201).json({
-      message: 'Post and related data inserted successfully with image object analysis (translated)',
+      message: 'Post created successfully with image analysis (top 5 labels + Thai)',
       post_id: insertedPostId,
       post_status,
       visionResults
@@ -667,7 +671,6 @@ router.post('/post/add', async (req, res) => {
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 
 // --------------------------------------------
 // API GET /by-user/:uid
