@@ -530,14 +530,19 @@ router.get('/saved-posts/:user_id', (req, res) => {
 const vision = require('@google-cloud/vision');
 const { Translate } = require('@google-cloud/translate').v2;
 
+// อ่าน credential จาก env
+const translateCredentials = JSON.parse(process.env.GOOGLE_TRANSLATE_CREDENTIALS_JSON);
+const visionCredentials = JSON.parse(process.env.GOOGLE_VISION_CREDENTIALS_JSON);
+
+// สร้าง client ของ Google Translate
 const translateClient = new Translate({
-  keyFilename: 'D:/Project Appication/final_project_backend/practical-now-465814-r5-2d95bf6ba8d7.json',
-  projectId: 'practical-now-465814-r5',
+  credentials: translateCredentials,
+  projectId: translateCredentials.project_id,
 });
 
 // สร้าง client ของ Google Vision
 const visionClient = new vision.ImageAnnotatorClient({
-  keyFilename: 'D:/Project Appication/final_project_backend/practical-now-465814-r5-fc7948fa14db.json',
+  credentials: visionCredentials,
 });
 
 router.post('/post/add', async (req, res) => {
