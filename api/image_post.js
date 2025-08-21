@@ -123,6 +123,140 @@ router.get("/get", (req, res) => {
   }
 });
 
+router.post("/post/search", (req, res) => {
+  try {
+    const { keyword } = req.body;
+
+    if (!keyword || keyword.trim() === "") {
+      return res.status(400).json({ message: "กรุณาระบุ keyword ที่ต้องการค้นหา" });
+    }
+
+    // Query post + user
+    const postSql = `
+      SELECT 
+        post.*, 
+        user.uid, user.name, user.email, 
+        user.personal_description, user.profile_image,
+        user.height, user.weight, user.shirt_size, user.chest, user.waist_circumference, user.hip
+      FROM post
+      JOIN user ON post.post_fk_uid = user.uid
+      ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC
+    `;
+
+    conn.query(postSql, (err, postResults) => {
+      if (err) return res.status(400).json({ error: 'Post query error' });
+      if (postResults.length === 0) return res.status(404).json({ error: 'No posts found' });
+
+      // Query ข้อมูลที่เกี่ยวข้อง
+      const imageSql = `SELECT * FROM image_post`;
+      const categorySql = `
+        SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
+        FROM post_category pc
+        JOIN category c ON pc.category_id_fk = c.cid
+      `;
+      const hashtagSql = `
+        SELECT ph.post_id_fk, h.tag_id, h.tag_name 
+        FROM post_hashtags ph
+        JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
+      `;
+      const likeSql = `
+        SELECT post_id_fk AS post_id, COUNT(*) AS like_count 
+        FROM post_likes 
+        GROUP BY post_id_fk
+      `;
+      const labelSql = `
+        SELECT post_id_fk, analysis_text
+        FROM post_image_analysis
+        WHERE analysis_text LIKE ?
+      `;
+
+      // ใช้ Promise.all query พร้อมกัน
+      Promise.all([
+        new Promise((resolve, reject) => conn.query(imageSql, (err, results) => err ? reject(err) : resolve(results))),
+        new Promise((resolve, reject) => conn.query(categorySql, (err, results) => err ? reject(err) : resolve(results))),
+        new Promise((resolve, reject) => conn.query(hashtagSql, (err, results) => err ? reject(err) : resolve(results))),
+        new Promise((resolve, reject) => conn.query(likeSql, (err, results) => err ? reject(err) : resolve(results))),
+        new Promise((resolve, reject) => conn.query(labelSql, [`%${keyword}%`], (err, results) => err ? reject(err) : resolve(results)))
+      ])
+      .then(([imageResults, categoryResults, hashtagResults, likeResults, labelResults]) => {
+        const likeMap = {};
+        likeResults.forEach(item => {
+          likeMap[item.post_id] = item.like_count;
+        });
+
+        // แปลง post_id ของ label ให้เป็น set เพื่อ filter post
+        const matchedPostIds = new Set(labelResults.map(l => l.post_id_fk));
+
+        const postsWithData = postResults
+          .filter(post => matchedPostIds.has(post.post_id)) // filter ตาม keyword Vision API
+          .map(post => {
+            const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
+            const categories = categoryResults
+              .filter(cat => cat.post_id_fk === post.post_id)
+              .map(cat => ({
+                cid: cat.cid,
+                cname: cat.cname,
+                cimage: cat.cimage,
+                ctype: cat.ctype
+              }));
+            const hashtags = hashtagResults
+              .filter(ht => ht.post_id_fk === post.post_id)
+              .map(ht => ({
+                tag_id: ht.tag_id,
+                tag_name: ht.tag_name
+              }));
+            const visionLabels = labelResults
+              .filter(l => l.post_id_fk === post.post_id)
+              .map(l => JSON.parse(l.analysis_text))
+              .flat();
+
+            return {
+              post: {
+                post_id: post.post_id,
+                post_topic: post.post_topic,
+                post_description: post.post_description,
+                post_date: post.post_date,
+                post_fk_cid: post.post_fk_cid,
+                post_fk_uid: post.post_fk_uid,
+                post_status: post.post_status,
+                amount_of_like: likeMap[post.post_id] || 0,
+                amount_of_save: post.amount_of_save || 0,
+                amount_of_comment: post.amount_of_comment || 0,
+              },
+              user: {
+                uid: post.uid,
+                name: post.name,
+                email: post.email,
+                personal_description: post.personal_description,
+                profile_image: post.profile_image,
+                height: post.height,
+                weight: post.weight,
+                shirt_size: post.shirt_size,
+                chest: post.chest,
+                waist_circumference: post.waist_circumference,
+                hip: post.hip
+              },
+              images,
+              categories,
+              hashtags,
+              visionLabels
+            };
+          });
+
+        res.status(200).json(postsWithData);
+      })
+      .catch(err => {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+      });
+
+    });
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
 
 const admin = require('firebase-admin');
 // ต้องตั้งค่า Firebase Admin SDK ก่อน (โหลด service account json)
@@ -396,22 +530,23 @@ router.get('/saved-posts/:user_id', (req, res) => {
 const vision = require('@google-cloud/vision');
 const { Translate } = require('@google-cloud/translate').v2;
 
+const translateClient = new Translate({
+  keyFilename: 'D:/Project Appication/final_project_backend/practical-now-465814-r5-2d95bf6ba8d7.json', 
+  projectId: 'practical-now-465814-r5',
+});
+
 // สร้าง client ของ Google Vision
 const visionClient = new vision.ImageAnnotatorClient({
   keyFilename: 'D:/Project Appication/final_project_backend/practical-now-465814-r5-fc7948fa14db.json',
-});
-const translateClient = new Translate({
-  keyFilename: 'D:/Project Appication/final_project_backend/practical-now-465814-r5-2d95bf6ba8d7.json', // ใส่ path ให้ถูกต้อง
-  projectId: 'practical-now-465814-r5',
 });
 
 router.post('/post/add', async (req, res) => {
   try {
     let { post_topic, post_description, post_fk_uid, images, category_id_fk, hashtags, post_status } = req.body;
 
-    post_topic = post_topic?.trim() === '' ? null : post_topic;
-    post_description = post_description?.trim() === '' ? null : post_description;
-    post_status = (typeof post_status === 'string' && post_status.trim().toLowerCase() === 'friends') ? 'friends' : 'public';
+    post_topic = post_topic?.trim() || null;
+    post_description = post_description?.trim() || null;
+    post_status = (post_status && post_status.toLowerCase() === 'friends') ? 'friends' : 'public';
 
     if (!post_fk_uid || !Array.isArray(images)) {
       return res.status(400).json({ error: 'Missing required fields: post_fk_uid or images' });
@@ -422,7 +557,6 @@ router.post('/post/add', async (req, res) => {
       INSERT INTO post (post_topic, post_description, post_date, post_fk_uid, post_status)
       VALUES (?, ?, NOW(), ?, ?)
     `;
-
     const postResult = await new Promise((resolve, reject) => {
       conn.query(insertPostSql, [post_topic, post_description, post_fk_uid, post_status], (err, result) => {
         if (err) reject(err);
@@ -432,20 +566,61 @@ router.post('/post/add', async (req, res) => {
 
     const insertedPostId = postResult.insertId;
 
-    // Insert images
-    const insertImages = () => {
-      if (!images.length) return Promise.resolve();
-      const insertImageSql = `INSERT INTO image_post (image, image_fk_postid) VALUES ?`;
-      const imageValues = images.map(url => [url, insertedPostId]);
+    // วิเคราะห์ภาพ → labelDetection + แปลไทย
+    const analyzeImages = async () => {
+      const results = [];
+      for (const imageUrl of images) {
+        try {
+          const [visionResult] = await visionClient.labelDetection({
+            image: { source: { imageUri: imageUrl } },
+          });
+
+          const labels = [];
+          for (const label of visionResult.labelAnnotations) {
+            const description = label.description;
+
+            // ✅ แปลไทย
+            const [translation] = await translateClient.translate(description, 'th');
+
+            labels.push({
+              en: description,
+              th: translation
+            });
+          }
+
+          results.push({ image: imageUrl, labels });
+        } catch (err) {
+          console.error('Error analyzing image', imageUrl, err);
+          results.push({ image: imageUrl, labels: [], error: err.message });
+        }
+      }
+      return results;
+    };
+
+    const visionResults = await analyzeImages();
+
+    // Insert ลง DB
+    const insertImageAnalysis = () => {
+      if (!visionResults.length) return Promise.resolve();
+      const insertSql = `
+        INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text, created_at)
+        VALUES ?
+      `;
+      const values = visionResults.map(vr => [
+        insertedPostId,
+        vr.image,
+        JSON.stringify(vr.labels), // เก็บ en + th เป็น JSON
+        new Date()
+      ]);
       return new Promise((resolve, reject) => {
-        conn.query(insertImageSql, [imageValues], (err) => {
+        conn.query(insertSql, [values], (err) => {
           if (err) reject(err);
           else resolve();
         });
       });
     };
 
-    // Insert categories
+    // insert categories & hashtags
     const insertCategories = () => {
       if (!Array.isArray(category_id_fk) || category_id_fk.length === 0) return Promise.resolve();
       const insertCategorySql = `INSERT INTO post_category (category_id_fk, post_id_fk) VALUES ?`;
@@ -458,7 +633,6 @@ router.post('/post/add', async (req, res) => {
       });
     };
 
-    // Insert hashtags
     const insertPostHashtags = () => {
       if (!Array.isArray(hashtags) || hashtags.length === 0) return Promise.resolve();
       const insertPostHashtagSql = `INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?`;
@@ -471,25 +645,25 @@ router.post('/post/add', async (req, res) => {
       });
     };
 
-    // รันพร้อมกัน
     await Promise.all([
-      insertImages(),
+      insertImageAnalysis(),
       insertCategories(),
       insertPostHashtags()
     ]);
 
+    // ส่งกลับ Flutter
     return res.status(201).json({
-      message: 'Post and related data inserted successfully',
+      message: 'Post and related data inserted successfully with image object analysis (translated)',
       post_id: insertedPostId,
       post_status,
+      visionResults
     });
+
   } catch (error) {
     console.error('Error in /post/add:', error);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
-
-
 
 
 // --------------------------------------------
