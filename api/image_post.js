@@ -431,25 +431,17 @@ router.post('/post/add', async (req, res) => {
     const visionResults = [];
     for (const img of images) {
       try {
-        // ตรวจสอบว่าฐานข้อมูลเป็น URL หรือ Base64
-        const isBase64 = !img.startsWith('http');
-        const request = isBase64
-          ? { image: { content: img } }
-          : { image: { source: { imageUri: img } } };
+        // ถ้า Base64: { content: "..." } หรือ URL: { source: { imageUri: img } }
+        const request = img.startsWith('http') ? { image: { source: { imageUri: img } } } : { image: { content: img } };
 
         const [visionResult] = await visionClient.labelDetection(request);
 
         const labels = [];
-        if (visionResult.labelAnnotations) {
-          for (const label of visionResult.labelAnnotations) {
-            const description = label.description;
-            const [translation] = await translateClient.translate(description, 'th');
-            labels.push({ en: description, th: translation });
-          }
-        } else {
-          console.log('⚠️ Vision AI returned empty labels for this image');
+        for (const label of visionResult.labelAnnotations) {
+          const description = label.description;
+          const [translation] = await translateClient.translate(description, 'th');
+          labels.push({ en: description, th: translation });
         }
-
         visionResults.push({ image: img, labels });
       } catch (err) {
         console.error('Error analyzing image', err);
@@ -1175,9 +1167,9 @@ router.put('/notification/read/:notification_id', (req, res) => {
 // POST /comment
 router.post('/comment', (req, res) => {
   const { user_id, post_id, comment_text } = req.body;
-
+  
   console.log('[Comment] Request body:', req.body);
-
+  
   if (!user_id || !post_id || !comment_text) {
     console.log('[Comment] Missing user_id, post_id, or comment_text');
     return res.status(400).json({ error: 'user_id, post_id, and comment_text are required' });
@@ -1188,52 +1180,52 @@ router.post('/comment', (req, res) => {
     INSERT INTO post_comments (user_id_fk, post_id_fk, comment_text)
     VALUES (?, ?, ?)
   `;
-
+  
   conn.query(insertSql, [user_id, post_id, comment_text], (err, result) => {
     if (err) {
       console.log('[Comment] Insert comment failed:', err);
       return res.status(500).json({ error: 'Comment insert failed' });
     }
-
+    
     const comment_id = result.insertId;
     console.log(`[Comment] User ${user_id} commented on post ${post_id} (comment_id: ${comment_id})`);
-
+    
     // 2️⃣ หาว่าเจ้าของโพสต์เป็นใคร
     const ownerSql = 'SELECT post_fk_uid FROM post WHERE post_id = ?';
-
+    
     console.log('[Comment] Querying post owner for post_id:', post_id);
-
+    
     conn.query(ownerSql, [post_id], (err2, ownerResult) => {
       if (err2) {
         console.log('[Comment] Get post owner failed:', err2);
         return res.status(500).json({ error: 'Get post owner failed' });
       }
-
+      
       console.log('[Comment] Post owner query result:', ownerResult);
-
+      
       if (ownerResult.length > 0) {
         const receiver_uid = ownerResult[0].post_fk_uid;
-
+        
         console.log('[Comment] Post owner (receiver_uid):', receiver_uid);
         console.log('[Comment] Comment author (user_id):', user_id);
         console.log('[Comment] Should create notification?', receiver_uid !== user_id);
-
+        
         // ไม่ส่ง notification ถ้าเจ้าของโพสต์คอมเมนต์ตัวเอง
         if (receiver_uid !== user_id) {
           const message = 'ได้คอมเมนต์โพสต์ของคุณ';
-
+          
           console.log('[Comment] Creating notification...');
-
+          
           // 🔹 Insert notification ลง MySQL
           const notifSql = `
             INSERT INTO notifications (sender_uid, receiver_uid, post_id, type, message, is_read)
             VALUES (?, ?, ?, 'comment', ?, 0)
           `;
-
+          
           const notifValues = [user_id, receiver_uid, post_id, message];
           console.log('[Comment] Notification SQL:', notifSql);
           console.log('[Comment] Notification values:', notifValues);
-
+          
           conn.query(notifSql, notifValues, (err3, result3) => {
             if (err3) {
               console.log('[Comment] Notification insert failed (MySQL):', err3);
@@ -1248,7 +1240,7 @@ router.post('/comment', (req, res) => {
               console.log('[Comment] Insert result:', result3);
             }
           });
-
+          
           // 🔹 Insert notification ลง Firebase Realtime Database
           const notifData = {
             sender_uid: user_id,
@@ -1259,10 +1251,10 @@ router.post('/comment', (req, res) => {
             is_read: false,
             created_at: admin.database.ServerValue.TIMESTAMP
           };
-
+          
           const db = admin.database();
           const notifRef = db.ref('notifications').push();
-
+          
           notifRef.set(notifData)
             .then(() => {
               console.log('[Comment] ✅ Notification added to Firebase with key:', notifRef.key);
@@ -1270,18 +1262,18 @@ router.post('/comment', (req, res) => {
             .catch((firebaseErr) => {
               console.log('[Comment] Firebase notification insert failed:', firebaseErr);
             });
-
+            
         } else {
           console.log('[Comment] 🚫 Skipping notification - user commented on own post');
         }
       } else {
         console.log('[Comment] ⚠️  No post found with post_id:', post_id);
       }
-
+      
       // ส่ง response กลับ
       console.log('[Comment] Sending response...');
-      res.status(200).json({
-        message: 'Comment added',
+      res.status(200).json({ 
+        message: 'Comment added', 
         comment_id: comment_id,
         debug: {
           user_id,
