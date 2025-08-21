@@ -544,122 +544,237 @@ router.post('/post/add', async (req, res) => {
   try {
     let { post_topic, post_description, post_fk_uid, images, category_id_fk, hashtags, post_status } = req.body;
 
+    console.log('=== POST ADD REQUEST ===');
+    console.log('Request Body:', JSON.stringify(req.body, null, 2));
+
     post_topic = post_topic?.trim() || null;
     post_description = post_description?.trim() || null;
     post_status = (post_status && post_status.toLowerCase() === 'friends') ? 'friends' : 'public';
 
+    // Validation
     if (!post_fk_uid || !Array.isArray(images) || images.length === 0) {
-      return res.status(400).json({ error: 'Missing required fields: post_fk_uid or images' });
+      console.log('❌ Validation failed');
+      return res.status(400).json({ 
+        error: 'Missing required fields: post_fk_uid or images',
+        received: { post_fk_uid, images: images?.length || 0 }
+      });
     }
 
-    // Insert post
+    console.log('✅ Validation passed');
+
+    // Insert post first
     const insertPostSql = `
       INSERT INTO post (post_topic, post_description, post_date, post_fk_uid, post_status)
       VALUES (?, ?, NOW(), ?, ?)
     `;
+    
+    console.log('🔄 Inserting post...');
     const postResult = await new Promise((resolve, reject) => {
       conn.query(insertPostSql, [post_topic, post_description, post_fk_uid, post_status], (err, result) => {
-        if (err) reject(err);
-        else resolve(result);
+        if (err) {
+          console.error('❌ Post insert error:', err);
+          reject(err);
+        } else {
+          console.log('✅ Post inserted with ID:', result.insertId);
+          resolve(result);
+        }
       });
     });
 
     const insertedPostId = postResult.insertId;
 
-    // Analyze images safely
+    // Analyze images with better error handling and timeout
     const analyzeImages = async () => {
+      console.log('🔄 Starting image analysis...');
       const results = [];
-      for (const imageUrl of images) {
+      
+      for (let i = 0; i < images.length; i++) {
+        const imageUrl = images[i];
+        console.log(`Analyzing image ${i + 1}/${images.length}: ${imageUrl}`);
+        
         try {
-          const [visionResult] = await visionClient.labelDetection({
+          // Add timeout for vision API call
+          const visionPromise = visionClient.labelDetection({
             image: { source: { imageUri: imageUrl } },
           });
 
-          const topLabels = (visionResult.labelAnnotations || []).slice(0, 5); // Limit top 5
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Vision API timeout')), 10000); // 10 second timeout
+          });
+
+          const [visionResult] = await Promise.race([visionPromise, timeoutPromise]);
+          
+          if (!visionResult || !visionResult.labelAnnotations) {
+            console.log(`⚠️ No labels found for image ${i + 1}`);
+            results.push({ image: imageUrl, labels: [] });
+            continue;
+          }
+
+          const topLabels = visionResult.labelAnnotations.slice(0, 3); // Reduce to 3 labels
           const labels = [];
 
           for (const label of topLabels) {
             const description = label.description || '';
             let translation = '';
+            
             try {
-              const [translated] = await translateClient.translate(description, 'th');
-              translation = translated || '';
-            } catch (err) {
-              console.error('Translate error:', err);
+              // Add timeout for translation
+              const translatePromise = translateClient.translate(description, 'th');
+              const translateTimeout = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Translation timeout')), 5000);
+              });
+              
+              const [translated] = await Promise.race([translatePromise, translateTimeout]);
+              translation = translated || description;
+            } catch (translateErr) {
+              console.warn('Translation failed:', translateErr.message);
+              translation = description; // Fallback to original
             }
+            
             labels.push({ en: description, th: translation });
           }
 
           results.push({ image: imageUrl, labels });
+          console.log(`✅ Image ${i + 1} analyzed successfully`);
+
         } catch (err) {
-          console.error('Vision analyze error:', err);
-          results.push({ image: imageUrl, labels: [], error: err.message });
+          console.error(`❌ Vision analyze error for image ${i + 1}:`, err.message);
+          // Continue processing other images even if one fails
+          results.push({ 
+            image: imageUrl, 
+            labels: [], 
+            error: `Analysis failed: ${err.message}` 
+          });
         }
       }
+      
+      console.log('📊 Image analysis complete:', results.length);
       return results;
     };
 
-    const visionResults = await analyzeImages();
-
-    // Insert analysis results
-    const insertImageAnalysis = () => {
-      if (!visionResults.length) return Promise.resolve();
-      const insertSql = `
-        INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text, created_at)
-        VALUES ?
-      `;
-      const values = visionResults.map(vr => [
-        insertedPostId,
-        vr.image,
-        JSON.stringify(vr.labels || []),
-        new Date()
-      ]);
-      return new Promise((resolve, reject) => {
-        conn.query(insertSql, [values], (err) => {
-          if (err) reject(err);
-          else resolve();
-        });
+    // Run image analysis with timeout
+    let visionResults = [];
+    try {
+      const analysisTimeout = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Image analysis timeout')), 30000); // 30 second total timeout
       });
+      
+      visionResults = await Promise.race([analyzeImages(), analysisTimeout]);
+    } catch (analysisError) {
+      console.error('❌ Image analysis failed:', analysisError.message);
+      // Continue without analysis results
+      visionResults = images.map(img => ({ image: img, labels: [], error: 'Analysis timeout' }));
+    }
+
+    // Insert analysis results (optional - don't fail if this fails)
+    const insertImageAnalysis = async () => {
+      if (!visionResults.length) return;
+      
+      try {
+        const insertSql = `
+          INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text, created_at)
+          VALUES ?
+        `;
+        const values = visionResults.map(vr => [
+          insertedPostId,
+          vr.image,
+          JSON.stringify(vr.labels || []),
+          new Date()
+        ]);
+        
+        await new Promise((resolve, reject) => {
+          conn.query(insertSql, [values], (err) => {
+            if (err) {
+              console.warn('⚠️ Analysis insert failed:', err.message);
+              resolve(); // Don't reject, just warn
+            } else {
+              console.log('✅ Analysis results saved');
+              resolve();
+            }
+          });
+        });
+      } catch (err) {
+        console.warn('⚠️ Analysis insert error:', err.message);
+      }
     };
 
     // Insert categories
-    const insertCategories = () => {
-      if (!Array.isArray(category_id_fk) || category_id_fk.length === 0) return Promise.resolve();
-      const insertCategorySql = `INSERT INTO post_category (category_id_fk, post_id_fk) VALUES ?`;
-      const categoryValues = category_id_fk.map(catId => [catId, insertedPostId]);
-      return new Promise((resolve, reject) => {
-        conn.query(insertCategorySql, [categoryValues], (err) => {
-          if (err) reject(err);
-          else resolve();
+    const insertCategories = async () => {
+      if (!Array.isArray(category_id_fk) || category_id_fk.length === 0) return;
+      
+      try {
+        const insertCategorySql = `INSERT INTO post_category (category_id_fk, post_id_fk) VALUES ?`;
+        const categoryValues = category_id_fk.map(catId => [catId, insertedPostId]);
+        
+        await new Promise((resolve, reject) => {
+          conn.query(insertCategorySql, [categoryValues], (err) => {
+            if (err) reject(err);
+            else resolve();
+          });
         });
-      });
+        console.log('✅ Categories inserted');
+      } catch (err) {
+        console.error('❌ Categories insert error:', err);
+        throw err;
+      }
     };
 
     // Insert hashtags
-    const insertPostHashtags = () => {
-      if (!Array.isArray(hashtags) || hashtags.length === 0) return Promise.resolve();
-      const insertPostHashtagSql = `INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?`;
-      const values = hashtags.map(tagId => [insertedPostId, tagId]);
-      return new Promise((resolve, reject) => {
-        conn.query(insertPostHashtagSql, [values], (err) => {
-          if (err) reject(err);
-          else resolve();
+    const insertPostHashtags = async () => {
+      if (!Array.isArray(hashtags) || hashtags.length === 0) return;
+      
+      try {
+        const insertPostHashtagSql = `INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?`;
+        const values = hashtags.map(tagId => [insertedPostId, tagId]);
+        
+        await new Promise((resolve, reject) => {
+          conn.query(insertPostHashtagSql, [values], (err) => {
+            if (err) reject(err);
+            else resolve();
+          });
         });
-      });
+        console.log('✅ Hashtags inserted');
+      } catch (err) {
+        console.error('❌ Hashtags insert error:', err);
+        throw err;
+      }
     };
 
-    await Promise.all([insertImageAnalysis(), insertCategories(), insertPostHashtags()]);
+    // Execute all operations
+    console.log('🔄 Executing additional operations...');
+    try {
+      await Promise.all([
+        insertImageAnalysis(), // This won't fail the entire operation
+        insertCategories(),
+        insertPostHashtags()
+      ]);
+    } catch (err) {
+      console.error('❌ Additional operations error:', err);
+      // Don't return error here, post is already created
+    }
+
+    console.log('✅ Post creation completed successfully');
 
     return res.status(201).json({
-      message: 'Post created with image analysis successfully',
+      message: 'Post created successfully',
       post_id: insertedPostId,
       post_status,
-      visionResults
+      images_processed: images.length,
+      vision_analysis_completed: visionResults.filter(v => !v.error).length,
+      categories_added: Array.isArray(category_id_fk) ? category_id_fk.length : 0,
+      hashtags_added: Array.isArray(hashtags) ? hashtags.length : 0,
+      visionResults: visionResults // Include for debugging
     });
 
   } catch (error) {
-    console.error('Error in /post/add:', error);
-    return res.status(500).json({ error: 'Internal server error', details: error.message });
+    console.error('❌ Critical error in /post/add:', error);
+    
+    // Always return a proper JSON response
+    return res.status(500).json({ 
+      error: 'Internal server error', 
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
   }
 });
 
