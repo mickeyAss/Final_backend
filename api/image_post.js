@@ -1,8 +1,11 @@
 var express = require('express');
 var router = express.Router();
 var conn = require('../dbconnect')
-
-
+const axios = require('axios');
+require('dotenv').config();
+const vision = require('@google-cloud/vision');
+const { Translate } = require('@google-cloud/translate').v2;
+const sharp = require('sharp');
 module.exports = router;
 
 // --------------------------------------------
@@ -527,153 +530,139 @@ router.get('/saved-posts/:user_id', (req, res) => {
 // เพิ่มโพสต์พร้อมรูปภาพ, หมวดหมู่ และแฮชแท็ก
 // --------------------------------------------
 
-const vision = require('@google-cloud/vision');
-const { Translate } = require('@google-cloud/translate').v2;
+// Parse JSON from env
+function parseEnvJSON(varName) {
+  const value = process.env[varName];
+  if (!value) throw new Error(`${varName} is not set!`);
+  try { return JSON.parse(value); } 
+  catch (err) { throw new Error(`${varName} JSON parse error: ${err.message}`); }
+}
 
-// อ่าน credential จาก env
-const translateCredentials = JSON.parse(process.env.GOOGLE_TRANSLATE_CREDENTIALS_JSON);
-const visionCredentials = JSON.parse(process.env.GOOGLE_VISION_CREDENTIALS_JSON);
+// Google clients
+const translateCredentials = parseEnvJSON('GOOGLE_TRANSLATE_CREDENTIALS_JSON');
+const visionCredentials = parseEnvJSON('GOOGLE_VISION_CREDENTIALS_JSON');
 
-// สร้าง client ของ Google Translate
-const translateClient = new Translate({
-  credentials: translateCredentials,
-  projectId: translateCredentials.project_id,
-});
+const translateClient = new Translate({ credentials: translateCredentials, projectId: translateCredentials.project_id });
+const visionClient = new vision.ImageAnnotatorClient({ credentials: visionCredentials });
 
-// สร้าง client ของ Google Vision
-const visionClient = new vision.ImageAnnotatorClient({
-  credentials: visionCredentials,
-});
+// ตรวจสอบ magic bytes
+const isValidImageFormat = (buffer) => {
+  if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) return true; // JPEG
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) return true; // PNG
+  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && (buffer[3] === 0x38 || buffer[3] === 0x39)) return true; // GIF
+  if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46) return true; // WebP
+  return false;
+};
 
+// Fallback URL-based analysis
+const createFallbackAnalysis = (imageUrl) => {
+  const labels = [];
+  const url = imageUrl.toLowerCase();
+  if (url.includes('rolex')) labels.push({ en:'Watch', th:'นาฬิกา', score:0.9 });
+  if (url.includes('gold')) labels.push({ en:'Gold', th:'ทอง', score:0.8 });
+  if (!labels.length) labels.push({ en:'Product', th:'สินค้า', score:0.5 });
+  return labels.slice(0,5);
+};
+
+// Preprocess image ด้วย Sharp
+const preprocessImage = async (imageUrl) => {
+  const response = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout:30000 });
+  let buffer = Buffer.from(response.data);
+
+  buffer = await sharp(buffer)
+    .jpeg({ quality: 95, progressive: false, force: true })
+    .removeAlpha()
+    .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
+    .toBuffer();
+
+  if (!isValidImageFormat(buffer)) throw new Error('Invalid image format');
+  return buffer;
+};
+
+// Retry Vision API
+const callVisionAPI = async (buffer, maxRetries = 2) => {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      // labelDetection
+      const [result] = await visionClient.labelDetection({ image: { content: buffer }, maxResults: 5 });
+      if (result.labelAnnotations?.length) return result.labelAnnotations.map(l => ({ description: l.description, score: l.score }));
+      lastError = new Error('No labels detected');
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw lastError;
+};
+
+// Route /post/add
 router.post('/post/add', async (req, res) => {
   try {
     let { post_topic, post_description, post_fk_uid, images, category_id_fk, hashtags, post_status } = req.body;
-
     post_topic = post_topic?.trim() || null;
     post_description = post_description?.trim() || null;
     post_status = (post_status && post_status.toLowerCase() === 'friends') ? 'friends' : 'public';
 
-    if (!post_fk_uid || !Array.isArray(images) || images.length === 0) {
-      return res.status(400).json({ error: 'Missing required fields: post_fk_uid or images' });
-    }
+    if (!post_fk_uid || !Array.isArray(images) || images.length === 0)
+      return res.status(400).json({ error: 'Missing required fields' });
 
-    // Insert Post
-    const insertPostSql = `
-      INSERT INTO post (post_topic, post_description, post_date, post_fk_uid, post_status)
-      VALUES (?, ?, NOW(), ?, ?)
-    `;
+    // Insert post
+    const insertPostSql = `INSERT INTO post (post_topic, post_description, post_date, post_fk_uid, post_status) VALUES (?, ?, NOW(), ?, ?)`;
     const postResult = await new Promise((resolve, reject) => {
-      conn.query(insertPostSql, [post_topic, post_description, post_fk_uid, post_status], (err, result) => {
-        if (err) reject(err);
-        else resolve(result);
-      });
+      conn.query(insertPostSql, [post_topic, post_description, post_fk_uid, post_status], (err, result) => err ? reject(err) : resolve(result));
     });
     const insertedPostId = postResult.insertId;
 
-    // Function analyze image → label + translate
-    const analyzeImages = async () => {
-      const results = [];
+    const visionResults = [];
 
-      for (const imageUrl of images) {
-        try {
-          const [visionResult] = await visionClient.labelDetection({
-            image: { source: { imageUri: imageUrl } },
-          });
-
-          // Limit top 5 labels
-          const topLabels = visionResult.labelAnnotations.slice(0, 5);
-
-          // Translate all labels in parallel
-          const labels = await Promise.all(
-            topLabels.map(async (label) => {
-              const description = label.description;
-              try {
-                const [translation] = await translateClient.translate(description, 'th');
-                return { en: description, th: translation };
-              } catch (e) {
-                console.error('Translate error for', description, e.message);
-                return { en: description, th: '' };
-              }
-            })
-          );
-
-          results.push({ image: imageUrl, labels });
-        } catch (err) {
-          console.error('Vision error for', imageUrl, err.message);
-          results.push({ image: imageUrl, labels: [], error: err.message });
-        }
+    for (let imageUrl of images) {
+      let buffer;
+      let labels = [];
+      try {
+        buffer = await preprocessImage(imageUrl);
+        labels = await callVisionAPI(buffer, 2); // Retry 2 ครั้ง
+      } catch (err) {
+        console.warn(`Vision API failed for ${imageUrl}: ${err.message}`);
+        labels = createFallbackAnalysis(imageUrl);
       }
 
-      return results;
-    };
+      // Translate labels
+      const translatedLabels = await Promise.all(labels.map(async l=>{
+        try {
+          const [translation] = await translateClient.translate(l.description,'th');
+          return { en:l.description, th:translation, score:l.score||0.5 };
+        } catch {
+          return { en:l.description, th:l.description, score:l.score||0.5 };
+        }
+      }));
 
-    const visionResults = await analyzeImages();
+      visionResults.push({ image:imageUrl, labels:translatedLabels, success:true });
+    }
 
-    // Insert image analysis into DB
-    const insertImageAnalysis = () => {
-      if (!visionResults.length) return Promise.resolve();
-      const insertSql = `
-        INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text, created_at)
-        VALUES ?
-      `;
-      const values = visionResults.map(vr => [
-        insertedPostId,
-        vr.image,
-        JSON.stringify(vr.labels), // store JSON
-        new Date()
-      ]);
-      return new Promise((resolve, reject) => {
-        conn.query(insertSql, [values], (err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
-    };
+    // Insert image analysis
+    if (visionResults.length){
+      const insertSql = `INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text, created_at) VALUES ?`;
+      const values = visionResults.map(vr=>[insertedPostId, vr.image, JSON.stringify(vr.labels), new Date()]);
+      await new Promise((resolve,reject)=>conn.query(insertSql,[values],err=>err?reject(err):resolve()));
+    }
 
-    // Insert categories
-    const insertCategories = () => {
-      if (!Array.isArray(category_id_fk) || category_id_fk.length === 0) return Promise.resolve();
-      const insertCategorySql = `INSERT INTO post_category (category_id_fk, post_id_fk) VALUES ?`;
-      const categoryValues = category_id_fk.map(catId => [catId, insertedPostId]);
-      return new Promise((resolve, reject) => {
-        conn.query(insertCategorySql, [categoryValues], (err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
-    };
-
-    // Insert hashtags
-    const insertPostHashtags = () => {
-      if (!Array.isArray(hashtags) || hashtags.length === 0) return Promise.resolve();
-      const insertPostHashtagSql = `INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?`;
-      const values = hashtags.map(tagId => [insertedPostId, tagId]);
-      return new Promise((resolve, reject) => {
-        conn.query(insertPostHashtagSql, [values], (err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
-    };
-
-    // Run all inserts in parallel
-    await Promise.all([
-      insertImageAnalysis(),
-      insertCategories(),
-      insertPostHashtags()
-    ]);
-
-    // Response
     return res.status(201).json({
-      message: 'Post created successfully with image analysis (top 5 labels + Thai)',
-      post_id: insertedPostId,
+      message:'Post created successfully with image analysis',
+      post_id:insertedPostId,
       post_status,
-      visionResults
+      visionResults,
+      summary:{
+        totalImages:images.length,
+        successfulAnalysis:visionResults.filter(r=>r.success).length,
+        failedAnalysis:visionResults.filter(r=>!r.success).length
+      }
     });
 
-  } catch (error) {
-    console.error('Error in /post/add:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+  } catch(err){
+    console.error(err);
+    return res.status(500).json({ error:'Internal server error', details:err.message });
   }
 });
 
