@@ -11,7 +11,8 @@ module.exports = router;
 // --------------------------------------------
 router.get("/get", (req, res) => {
   try {
-    const targetUid = req.query.uid; // uid ที่ต้องการเปรียบเทียบ
+    const targetUid = req.query.uid;
+    const mode = req.query.mode || "feed"; // ค่า default = feed
 
     if (!targetUid) {
       return res.status(400).json({ error: "Target uid is required" });
@@ -25,7 +26,7 @@ router.get("/get", (req, res) => {
 
       const targetUser = targetResults[0];
 
-      const postSql = `
+      let postSql = `
         SELECT 
           post.*, 
           user.uid, user.name, user.email, 
@@ -34,8 +35,15 @@ router.get("/get", (req, res) => {
           user.chest, user.waist_circumference, user.hip
         FROM post
         JOIN user ON post.post_fk_uid = user.uid
-        ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC
       `;
+
+      if (mode === "self") {
+        postSql += ` WHERE post.post_fk_uid = ${conn.escape(targetUid)} `;
+      } else if (mode === "feed") {
+        postSql += ` WHERE post.post_fk_uid != ${conn.escape(targetUid)} `;
+      }
+
+      postSql += ` ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC`;
 
       conn.query(postSql, (err, postResults) => {
         if (err) return res.status(400).json({ error: 'Post query error' });
@@ -139,11 +147,11 @@ router.get("/get", (req, res) => {
                     images,
                     categories,
                     hashtags,
-                    similarity_distance: calcDistance(post, targetUser) // ✅ เพิ่มตรงนี้
+                    similarity_distance: calcDistance(post, targetUser)
                   };
                 });
 
-                // เรียงจากใกล้ → ไกล
+                // เรียงใกล้ → ไกล
                 postsWithData.sort((a, b) => a.similarity_distance - b.similarity_distance);
 
                 res.status(200).json(postsWithData);
