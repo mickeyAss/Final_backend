@@ -550,12 +550,18 @@ router.get('/saved-posts/:user_id', (req, res) => {
 const path = require('path');
 const vision = require('@google-cloud/vision');
 
-// __dirname = api/
-const keyFilePath = path.join(__dirname, '..', 'config', 'heroic-purpose-464720-v1-e9f63d38f25c.json');
-
-const visionClient = new vision.ImageAnnotatorClient({
-  keyFilename: keyFilePath
-});
+// เลือก key path สำหรับ dev หรือ production
+let visionClient;
+if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+  // ใช้ Environment Variable บน server/Render
+  visionClient = new vision.ImageAnnotatorClient();
+} else {
+  // สำหรับ dev Windows/macOS
+  const keyFilePath = path.join(__dirname, '..', 'config', 'heroic-purpose-464720-v1-e9f63d38f25c.json');
+  visionClient = new vision.ImageAnnotatorClient({
+    keyFilename: keyFilePath
+  });
+}
 
 router.post('/post/add', async (req, res) => {
   try {
@@ -591,7 +597,7 @@ router.post('/post/add', async (req, res) => {
       for (const imgUrl of images) {
         try {
           const [result] = await visionClient.labelDetection(imgUrl);
-          const labels = result.labelAnnotations.map(label => label.description).join(', ');
+          const labels = result.labelAnnotations?.map(label => label.description).join(', ') || '';
 
           const analysisSql = `
             INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text, created_at)
@@ -601,7 +607,8 @@ router.post('/post/add', async (req, res) => {
             conn.query(analysisSql, [insertedPostId, imgUrl, labels], (err) => err ? reject(err) : resolve())
           );
         } catch (err) {
-          console.error('Image analysis failed:', err);
+          console.error('⚠️ Image analysis failed:', err);
+          // ไม่ throw error → ไม่ crash server
         }
       }
     }
@@ -624,17 +631,15 @@ router.post('/post/add', async (req, res) => {
       );
     }
 
-    // ดึงโพสต์พร้อมข้อมูล user, images, categories, hashtags
-    const postSql = `
-      SELECT post.*, user.uid, user.name, user.email, user.personal_description, user.profile_image,
-             user.height, user.weight, user.shirt_size, user.chest, user.waist_circumference, user.hip
-      FROM post
-      JOIN user ON post.post_fk_uid = user.uid
-      WHERE post.post_id = ?
-    `;
-    const postData = await new Promise((resolve, reject) =>
-      conn.query(postSql, [insertedPostId], (err, results) => err ? reject(err) : resolve(results[0]))
-    );
+    // ดึงโพสต์พร้อม user, images, categories, hashtags, analysis
+    const postData = await new Promise((resolve, reject) => {
+      const sql = `SELECT post.*, user.uid, user.name, user.email, user.personal_description, user.profile_image,
+                          user.height, user.weight, user.shirt_size, user.chest, user.waist_circumference, user.hip
+                   FROM post
+                   JOIN user ON post.post_fk_uid = user.uid
+                   WHERE post.post_id = ?`;
+      conn.query(sql, [insertedPostId], (err, results) => err ? reject(err) : resolve(results[0]));
+    });
 
     const imageResults = await new Promise((resolve, reject) =>
       conn.query(`SELECT * FROM image_post WHERE image_fk_postid = ?`, [insertedPostId], (err, results) => err ? reject(err) : resolve(results))
@@ -656,14 +661,13 @@ router.post('/post/add', async (req, res) => {
         WHERE ph.post_id_fk = ?`, [insertedPostId], (err, results) => err ? reject(err) : resolve(results))
     );
 
-    // ดึงผลวิเคราะห์ภาพ
     const analysisResults = await new Promise((resolve, reject) =>
       conn.query(`SELECT * FROM post_image_analysis WHERE post_id_fk = ?`, [insertedPostId],
         (err, results) => err ? reject(err) : resolve(results)
       )
     );
 
-    // ปรับ responseData
+    // Response
     const responseData = {
       post: {
         post_id: postData.post_id,
@@ -700,12 +704,10 @@ router.post('/post/add', async (req, res) => {
       similarity_distance: 0
     };
 
-
-
     res.status(201).json({ message: 'Post created', post: responseData });
 
   } catch (error) {
-    console.error(error);
+    console.error('❌ Post creation failed', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
