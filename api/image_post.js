@@ -11,143 +11,106 @@ module.exports = router;
 // --------------------------------------------
 router.get("/get", (req, res) => {
   try {
-    const targetUid = req.query.uid; // uid ที่ต้องการเปรียบเทียบ
+    const postSql = `
+      SELECT 
+        post.*, 
+        user.uid, user.name, user.email, 
+        user.personal_description, user.profile_image,
+        user.height, user.weight, user.shirt_size, 
+        user.chest, user.waist_circumference, user.hip
+      FROM post
+      JOIN user ON post.post_fk_uid = user.uid
+      ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC
+    `;
 
-    if (!targetUid) {
-      return res.status(400).json({ error: "Target uid is required" });
-    }
+    conn.query(postSql, (err, postResults) => {
+      if (err) return res.status(400).json({ error: 'Post query error' });
+      if (postResults.length === 0) return res.status(404).json({ error: 'No posts found' });
 
-    // ดึง target user
-    const userSql = `SELECT * FROM user WHERE uid = ?`;
-    conn.query(userSql, [targetUid], (err, targetResults) => {
-      if (err) return res.status(400).json({ error: 'Target user query error' });
-      if (targetResults.length === 0) return res.status(404).json({ error: 'Target user not found' });
+      const imageSql = `SELECT * FROM image_post`;
+      conn.query(imageSql, (err, imageResults) => {
+        if (err) return res.status(400).json({ error: 'Image query error' });
 
-      const targetUser = targetResults[0];
+        const categorySql = `
+          SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
+          FROM post_category pc
+          JOIN category c ON pc.category_id_fk = c.cid
+        `;
+        conn.query(categorySql, (err, categoryResults) => {
+          if (err) return res.status(400).json({ error: 'Category query error' });
 
-      const postSql = `
-        SELECT 
-          post.*, 
-          user.uid, user.name, user.email, 
-          user.personal_description, user.profile_image,
-          user.height, user.weight, user.shirt_size, 
-          user.chest, user.waist_circumference, user.hip
-        FROM post
-        JOIN user ON post.post_fk_uid = user.uid
-        ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC
-      `;
-
-      conn.query(postSql, (err, postResults) => {
-        if (err) return res.status(400).json({ error: 'Post query error' });
-        if (postResults.length === 0) return res.status(404).json({ error: 'No posts found' });
-
-        const imageSql = `SELECT * FROM image_post`;
-        conn.query(imageSql, (err, imageResults) => {
-          if (err) return res.status(400).json({ error: 'Image query error' });
-
-          const categorySql = `
-            SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
-            FROM post_category pc
-            JOIN category c ON pc.category_id_fk = c.cid
+          const hashtagSql = `
+            SELECT ph.post_id_fk, h.tag_id, h.tag_name 
+            FROM post_hashtags ph
+            JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
           `;
-          conn.query(categorySql, (err, categoryResults) => {
-            if (err) return res.status(400).json({ error: 'Category query error' });
+          conn.query(hashtagSql, (err, hashtagResults) => {
+            if (err) return res.status(400).json({ error: 'Hashtag query error' });
 
-            const hashtagSql = `
-              SELECT ph.post_id_fk, h.tag_id, h.tag_name 
-              FROM post_hashtags ph
-              JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
+            const likeSql = `
+              SELECT post_id_fk AS post_id, COUNT(*) AS like_count 
+              FROM post_likes 
+              GROUP BY post_id_fk
             `;
-            conn.query(hashtagSql, (err, hashtagResults) => {
-              if (err) return res.status(400).json({ error: 'Hashtag query error' });
+            conn.query(likeSql, (err, likeResults) => {
+              if (err) return res.status(400).json({ error: 'Like count query error' });
 
-              const likeSql = `
-                SELECT post_id_fk AS post_id, COUNT(*) AS like_count 
-                FROM post_likes 
-                GROUP BY post_id_fk
-              `;
-              conn.query(likeSql, (err, likeResults) => {
-                if (err) return res.status(400).json({ error: 'Like count query error' });
-
-                const likeMap = {};
-                likeResults.forEach(item => {
-                  likeMap[item.post_id] = item.like_count;
-                });
-
-                // map size
-                const sizeMap = { XS: 1, S: 2, M: 3, L: 4, XL: 5, XXL: 6 };
-
-                // ฟังก์ชันคำนวณ distance
-                function calcDistance(u1, u2) {
-                  const shirt1 = sizeMap[u1.shirt_size] || 0;
-                  const shirt2 = sizeMap[u2.shirt_size] || 0;
-
-                  return Math.sqrt(
-                    Math.pow((u1.height || 0) - (u2.height || 0), 2) +
-                    Math.pow((u1.weight || 0) - (u2.weight || 0), 2) +
-                    Math.pow((u1.chest || 0) - (u2.chest || 0), 2) +
-                    Math.pow((u1.waist_circumference || 0) - (u2.waist_circumference || 0), 2) +
-                    Math.pow((u1.hip || 0) - (u2.hip || 0), 2) +
-                    Math.pow(shirt1 - shirt2, 2)
-                  );
-                }
-
-                const postsWithData = postResults.map(post => {
-                  const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
-                  const categories = categoryResults
-                    .filter(cat => cat.post_id_fk === post.post_id)
-                    .map(cat => ({
-                      cid: cat.cid,
-                      cname: cat.cname,
-                      cimage: cat.cimage,
-                      ctype: cat.ctype
-                    }));
-
-                  const hashtags = hashtagResults
-                    .filter(ht => ht.post_id_fk === post.post_id)
-                    .map(ht => ({
-                      tag_id: ht.tag_id,
-                      tag_name: ht.tag_name
-                    }));
-
-                  return {
-                    post: {
-                      post_id: post.post_id,
-                      post_topic: post.post_topic,
-                      post_description: post.post_description,
-                      post_date: post.post_date,
-                      post_fk_cid: post.post_fk_cid,
-                      post_fk_uid: post.post_fk_uid,
-                      post_status: post.post_status,
-                      amount_of_like: likeMap[post.post_id] || 0,
-                      amount_of_save: post.amount_of_save || 0,
-                      amount_of_comment: post.amount_of_comment || 0,
-                    },
-                    user: {
-                      uid: post.uid,
-                      name: post.name,
-                      email: post.email,
-                      personal_description: post.personal_description,
-                      profile_image: post.profile_image,
-                      height: post.height,
-                      weight: post.weight,
-                      shirt_size: post.shirt_size,
-                      chest: post.chest,
-                      waist_circumference: post.waist_circumference,
-                      hip: post.hip
-                    },
-                    images,
-                    categories,
-                    hashtags,
-                    similarity_distance: calcDistance(post, targetUser) // ✅ เพิ่มตรงนี้
-                  };
-                });
-
-                // เรียงจากใกล้ → ไกล
-                postsWithData.sort((a, b) => a.similarity_distance - b.similarity_distance);
-
-                res.status(200).json(postsWithData);
+              const likeMap = {};
+              likeResults.forEach(item => {
+                likeMap[item.post_id] = item.like_count;
               });
+
+              const postsWithData = postResults.map(post => {
+                const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
+                const categories = categoryResults
+                  .filter(cat => cat.post_id_fk === post.post_id)
+                  .map(cat => ({
+                    cid: cat.cid,
+                    cname: cat.cname,
+                    cimage: cat.cimage,
+                    ctype: cat.ctype
+                  }));
+
+                const hashtags = hashtagResults
+                  .filter(ht => ht.post_id_fk === post.post_id)
+                  .map(ht => ({
+                    tag_id: ht.tag_id,
+                    tag_name: ht.tag_name
+                  }));
+
+                return {
+                  post: {
+                    post_id: post.post_id,
+                    post_topic: post.post_topic,
+                    post_description: post.post_description,
+                    post_date: post.post_date,
+                    post_fk_cid: post.post_fk_cid,
+                    post_fk_uid: post.post_fk_uid,
+                    post_status: post.post_status,
+                    amount_of_like: likeMap[post.post_id] || 0,
+                    amount_of_save: post.amount_of_save || 0,
+                    amount_of_comment: post.amount_of_comment || 0,
+                  },
+                  user: {
+                    uid: post.uid,
+                    name: post.name,
+                    email: post.email,
+                    personal_description: post.personal_description,
+                    profile_image: post.profile_image,
+                    height: post.height,
+                    weight: post.weight,
+                    shirt_size: post.shirt_size,
+                    chest: post.chest,
+                    waist_circumference: post.waist_circumference,
+                    hip: post.hip
+                  },
+                  images,
+                  categories,
+                  hashtags
+                };
+              });
+
+              res.status(200).json(postsWithData);
             });
           });
         });
