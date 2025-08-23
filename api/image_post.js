@@ -12,14 +12,13 @@ module.exports = router;
 router.get("/get", (req, res) => {
   try {
     const targetUid = req.query.uid;
-    const mode = req.query.mode || "feed"; // ค่า default = feed
-    const firstLoad = req.query.firstLoad === "true"; // เช็คว่าครั้งแรกหรือไม่
+    const mode = req.query.mode || "feed"; 
+    const firstLoad = req.query.firstLoad === "true"; 
 
     if (!targetUid) {
       return res.status(400).json({ error: "Target uid is required" });
     }
 
-    // ดึง target user
     const userSql = `SELECT * FROM user WHERE uid = ?`;
     conn.query(userSql, [targetUid], (err, targetResults) => {
       if (err) return res.status(400).json({ error: 'Target user query error' });
@@ -28,37 +27,38 @@ router.get("/get", (req, res) => {
       const targetUser = targetResults[0];
 
       let postSql = `
-        SELECT 
-          post.*, 
-          user.uid, user.name, user.email, 
-          user.personal_description, user.profile_image,
-          user.height, user.weight, user.shirt_size, 
-          user.chest, user.waist_circumference, user.hip
+        SELECT post.*, user.uid, user.name, user.email, 
+               user.personal_description, user.profile_image,
+               user.height, user.weight, user.shirt_size, 
+               user.chest, user.waist_circumference, user.hip
         FROM post
         JOIN user ON post.post_fk_uid = user.uid
       `;
 
-      // 🔹 กรณีโหลดครั้งแรก → แสดงโพสต์ล่าสุดของตัวเอง
       if (firstLoad) {
-        postSql += ` WHERE post.post_fk_uid = ${conn.escape(targetUid)} `;
-        postSql += ` ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC LIMIT 1 `;
-      } 
-      // 🔹 โหลดแบบ feed ปกติ → แสดงโพสต์ของคนอื่น
-      else if (mode === "feed") {
-        postSql += ` WHERE post.post_fk_uid != ${conn.escape(targetUid)} `;
-        postSql += ` ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC `;
-      } 
-      // 🔹 self mode → แสดงทุกโพสต์ของตัวเอง
-      else if (mode === "self") {
-        postSql += ` WHERE post.post_fk_uid = ${conn.escape(targetUid)} `;
-        postSql += ` ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC `;
+        // ✅ โหลดครั้งแรก: เอาโพสต์ล่าสุดของตัวเองแค่ 1 โพสต์
+        postSql += ` WHERE post.post_fk_uid = ${conn.escape(targetUid)} 
+                     ORDER BY post.post_date DESC LIMIT 1 `;
+      } else if (mode === "feed") {
+        // ✅ โหลด feed: เอาโพสต์ของคนอื่น
+        postSql += ` WHERE post.post_fk_uid != ${conn.escape(targetUid)} 
+                     ORDER BY post.post_date DESC `;
+      } else if (mode === "self") {
+        // ✅ self mode: เอาโพสต์ทั้งหมดของตัวเอง
+        postSql += ` WHERE post.post_fk_uid = ${conn.escape(targetUid)} 
+                     ORDER BY post.post_date DESC `;
       }
 
       conn.query(postSql, (err, postResults) => {
         if (err) return res.status(400).json({ error: 'Post query error' });
         if (postResults.length === 0) return res.status(404).json({ error: 'No posts found' });
 
-        // --------------------- (โค้ด image, category, hashtag, like, distance mapping เหมือนเดิม) ---------------------
+        // ถ้า firstLoad = true → ส่งคืนแค่โพสต์ล่าสุดของตัวเอง
+        if (firstLoad) {
+          return res.status(200).json(postResults);
+        }
+
+        // 🔹 โหลดข้อมูลประกอบ (image, category, hashtag, like) สำหรับ feed หรือ self
         const imageSql = `SELECT * FROM image_post`;
         conn.query(imageSql, (err, imageResults) => {
           if (err) return res.status(400).json({ error: 'Image query error' });
@@ -97,7 +97,6 @@ router.get("/get", (req, res) => {
                 function calcDistance(u1, u2) {
                   const shirt1 = sizeMap[u1.shirt_size] || 0;
                   const shirt2 = sizeMap[u2.shirt_size] || 0;
-
                   return Math.sqrt(
                     Math.pow((u1.height || 0) - (u2.height || 0), 2) +
                     Math.pow((u1.weight || 0) - (u2.weight || 0), 2) +
@@ -110,21 +109,8 @@ router.get("/get", (req, res) => {
 
                 const postsWithData = postResults.map(post => {
                   const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
-                  const categories = categoryResults
-                    .filter(cat => cat.post_id_fk === post.post_id)
-                    .map(cat => ({
-                      cid: cat.cid,
-                      cname: cat.cname,
-                      cimage: cat.cimage,
-                      ctype: cat.ctype
-                    }));
-
-                  const hashtags = hashtagResults
-                    .filter(ht => ht.post_id_fk === post.post_id)
-                    .map(ht => ({
-                      tag_id: ht.tag_id,
-                      tag_name: ht.tag_name
-                    }));
+                  const categories = categoryResults.filter(cat => cat.post_id_fk === post.post_id);
+                  const hashtags = hashtagResults.filter(ht => ht.post_id_fk === post.post_id);
 
                   return {
                     post: {
@@ -132,7 +118,6 @@ router.get("/get", (req, res) => {
                       post_topic: post.post_topic,
                       post_description: post.post_description,
                       post_date: post.post_date,
-                      post_fk_cid: post.post_fk_cid,
                       post_fk_uid: post.post_fk_uid,
                       post_status: post.post_status,
                       amount_of_like: likeMap[post.post_id] || 0,
