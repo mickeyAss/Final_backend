@@ -38,14 +38,14 @@ router.get("/get", (req, res) => {
       `;
 
       if (firstLoad) {
-        // แสดงโพสต์ตัวเองล่าสุดที่โพสต์ไม่เกิน 1 นาที
+        // แสดงโพสต์ตัวเองล่าสุด (ไม่จำกัดเวลา)
         postSql += ` WHERE post.post_fk_uid = ${conn.escape(targetUid)}
-                     AND post.post_date >= NOW() - INTERVAL 1 MINUTE
-                     ORDER BY post.post_date DESC LIMIT 1`;
+               ORDER BY post.post_date DESC
+               LIMIT 1`;
       } else {
         // แสดงโพสต์คนอื่นทั้งหมด
         postSql += ` WHERE post.post_fk_uid != ${conn.escape(targetUid)}
-                     ORDER BY post.post_date DESC`;
+               ORDER BY post.post_date DESC`;
       }
 
       conn.query(postSql, (err, postResults) => {
