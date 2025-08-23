@@ -27,23 +27,32 @@ router.get("/get", (req, res) => {
       const targetUser = targetResults[0];
 
       let postSql = `
-        SELECT 
-          post.*, 
-          user.uid, user.name, user.email, 
-          user.personal_description, user.profile_image,
-          user.height, user.weight, user.shirt_size, 
-          user.chest, user.waist_circumference, user.hip
-        FROM post
-        JOIN user ON post.post_fk_uid = user.uid
-      `;
+  SELECT 
+    post.*, 
+    user.uid, user.name, user.email, 
+    user.personal_description, user.profile_image,
+    user.height, user.weight, user.shirt_size, 
+    user.chest, user.waist_circumference, user.hip
+  FROM post
+  JOIN user ON post.post_fk_uid = user.uid
+`;
 
       if (firstLoad) {
-        // แสดงโพสต์ตัวเองล่าสุด (ไม่จำกัดเวลา)
-        postSql += ` WHERE post.post_fk_uid = ${conn.escape(targetUid)}
-               ORDER BY post.post_date DESC
-               LIMIT 1`;
+        // union โพสต์ตัวเองล่าสุด + โพสต์คนอื่น
+        postSql = `
+    (SELECT * FROM post
+     JOIN user ON post.post_fk_uid = user.uid
+     WHERE post.post_fk_uid = ${conn.escape(targetUid)}
+     ORDER BY post.post_date DESC
+     LIMIT 1)
+    UNION ALL
+    (SELECT * FROM post
+     JOIN user ON post.post_fk_uid = user.uid
+     WHERE post.post_fk_uid != ${conn.escape(targetUid)}
+     ORDER BY post.post_date DESC)
+  `;
       } else {
-        // แสดงโพสต์คนอื่นทั้งหมด
+        // โหลดโพสต์คนอื่นทั้งหมด
         postSql += ` WHERE post.post_fk_uid != ${conn.escape(targetUid)}
                ORDER BY post.post_date DESC`;
       }
