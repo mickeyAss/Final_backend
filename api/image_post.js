@@ -11,107 +11,143 @@ module.exports = router;
 // --------------------------------------------
 router.get("/get", (req, res) => {
   try {
-    const postSql = `
-      SELECT 
-        post.*, 
-        user.uid, user.name, user.email, 
-        user.personal_description, user.profile_image,
-        user.height, user.weight, user.shirt_size, user.chest, user.waist_circumference, user.hip
-      FROM post
-      JOIN user ON post.post_fk_uid = user.uid
-      ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC
-    `;
+    const targetUid = req.query.uid; // uid ที่ต้องการเปรียบเทียบ
 
-    conn.query(postSql, (err, postResults) => {
-      if (err) return res.status(400).json({ error: 'Post query error' });
+    if (!targetUid) {
+      return res.status(400).json({ error: "Target uid is required" });
+    }
 
-      if (postResults.length === 0)
-        return res.status(404).json({ error: 'No posts found' });
+    // ดึง target user
+    const userSql = `SELECT * FROM user WHERE uid = ?`;
+    conn.query(userSql, [targetUid], (err, targetResults) => {
+      if (err) return res.status(400).json({ error: 'Target user query error' });
+      if (targetResults.length === 0) return res.status(404).json({ error: 'Target user not found' });
 
-      const imageSql = `SELECT * FROM image_post`;
-      conn.query(imageSql, (err, imageResults) => {
-        if (err) return res.status(400).json({ error: 'Image query error' });
+      const targetUser = targetResults[0];
 
-        const categorySql = `
-          SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
-          FROM post_category pc
-          JOIN category c ON pc.category_id_fk = c.cid
-        `;
-        conn.query(categorySql, (err, categoryResults) => {
-          if (err) return res.status(400).json({ error: 'Category query error' });
+      const postSql = `
+        SELECT 
+          post.*, 
+          user.uid, user.name, user.email, 
+          user.personal_description, user.profile_image,
+          user.height, user.weight, user.shirt_size, 
+          user.chest, user.waist_circumference, user.hip
+        FROM post
+        JOIN user ON post.post_fk_uid = user.uid
+        ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC
+      `;
 
-          const hashtagSql = `
-            SELECT ph.post_id_fk, h.tag_id, h.tag_name 
-            FROM post_hashtags ph
-            JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
+      conn.query(postSql, (err, postResults) => {
+        if (err) return res.status(400).json({ error: 'Post query error' });
+        if (postResults.length === 0) return res.status(404).json({ error: 'No posts found' });
+
+        const imageSql = `SELECT * FROM image_post`;
+        conn.query(imageSql, (err, imageResults) => {
+          if (err) return res.status(400).json({ error: 'Image query error' });
+
+          const categorySql = `
+            SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
+            FROM post_category pc
+            JOIN category c ON pc.category_id_fk = c.cid
           `;
-          conn.query(hashtagSql, (err, hashtagResults) => {
-            if (err) return res.status(400).json({ error: 'Hashtag query error' });
+          conn.query(categorySql, (err, categoryResults) => {
+            if (err) return res.status(400).json({ error: 'Category query error' });
 
-            const likeSql = `
-              SELECT post_id_fk AS post_id, COUNT(*) AS like_count 
-              FROM post_likes 
-              GROUP BY post_id_fk
+            const hashtagSql = `
+              SELECT ph.post_id_fk, h.tag_id, h.tag_name 
+              FROM post_hashtags ph
+              JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
             `;
-            conn.query(likeSql, (err, likeResults) => {
-              if (err) return res.status(400).json({ error: 'Like count query error' });
+            conn.query(hashtagSql, (err, hashtagResults) => {
+              if (err) return res.status(400).json({ error: 'Hashtag query error' });
 
-              const likeMap = {};
-              likeResults.forEach(item => {
-                likeMap[item.post_id] = item.like_count;
+              const likeSql = `
+                SELECT post_id_fk AS post_id, COUNT(*) AS like_count 
+                FROM post_likes 
+                GROUP BY post_id_fk
+              `;
+              conn.query(likeSql, (err, likeResults) => {
+                if (err) return res.status(400).json({ error: 'Like count query error' });
+
+                const likeMap = {};
+                likeResults.forEach(item => {
+                  likeMap[item.post_id] = item.like_count;
+                });
+
+                // map size
+                const sizeMap = { XS: 1, S: 2, M: 3, L: 4, XL: 5, XXL: 6 };
+
+                // ฟังก์ชันคำนวณ distance
+                function calcDistance(u1, u2) {
+                  const shirt1 = sizeMap[u1.shirt_size] || 0;
+                  const shirt2 = sizeMap[u2.shirt_size] || 0;
+
+                  return Math.sqrt(
+                    Math.pow((u1.height || 0) - (u2.height || 0), 2) +
+                    Math.pow((u1.weight || 0) - (u2.weight || 0), 2) +
+                    Math.pow((u1.chest || 0) - (u2.chest || 0), 2) +
+                    Math.pow((u1.waist_circumference || 0) - (u2.waist_circumference || 0), 2) +
+                    Math.pow((u1.hip || 0) - (u2.hip || 0), 2) +
+                    Math.pow(shirt1 - shirt2, 2)
+                  );
+                }
+
+                const postsWithData = postResults.map(post => {
+                  const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
+                  const categories = categoryResults
+                    .filter(cat => cat.post_id_fk === post.post_id)
+                    .map(cat => ({
+                      cid: cat.cid,
+                      cname: cat.cname,
+                      cimage: cat.cimage,
+                      ctype: cat.ctype
+                    }));
+
+                  const hashtags = hashtagResults
+                    .filter(ht => ht.post_id_fk === post.post_id)
+                    .map(ht => ({
+                      tag_id: ht.tag_id,
+                      tag_name: ht.tag_name
+                    }));
+
+                  return {
+                    post: {
+                      post_id: post.post_id,
+                      post_topic: post.post_topic,
+                      post_description: post.post_description,
+                      post_date: post.post_date,
+                      post_fk_cid: post.post_fk_cid,
+                      post_fk_uid: post.post_fk_uid,
+                      post_status: post.post_status,
+                      amount_of_like: likeMap[post.post_id] || 0,
+                      amount_of_save: post.amount_of_save || 0,
+                      amount_of_comment: post.amount_of_comment || 0,
+                    },
+                    user: {
+                      uid: post.uid,
+                      name: post.name,
+                      email: post.email,
+                      personal_description: post.personal_description,
+                      profile_image: post.profile_image,
+                      height: post.height,
+                      weight: post.weight,
+                      shirt_size: post.shirt_size,
+                      chest: post.chest,
+                      waist_circumference: post.waist_circumference,
+                      hip: post.hip
+                    },
+                    images,
+                    categories,
+                    hashtags,
+                    similarity_distance: calcDistance(post, targetUser) // ✅ เพิ่มตรงนี้
+                  };
+                });
+
+                // เรียงจากใกล้ → ไกล
+                postsWithData.sort((a, b) => a.similarity_distance - b.similarity_distance);
+
+                res.status(200).json(postsWithData);
               });
-
-              const postsWithData = postResults.map(post => {
-                const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
-                const categories = categoryResults
-                  .filter(cat => cat.post_id_fk === post.post_id)
-                  .map(cat => ({
-                    cid: cat.cid,
-                    cname: cat.cname,
-                    cimage: cat.cimage,
-                    ctype: cat.ctype
-                  }));
-
-                const hashtags = hashtagResults
-                  .filter(ht => ht.post_id_fk === post.post_id)
-                  .map(ht => ({
-                    tag_id: ht.tag_id,
-                    tag_name: ht.tag_name
-                  }));
-
-                return {
-                  post: {
-                    post_id: post.post_id,
-                    post_topic: post.post_topic,
-                    post_description: post.post_description,
-                    post_date: post.post_date,
-                    post_fk_cid: post.post_fk_cid,
-                    post_fk_uid: post.post_fk_uid,
-                    post_status: post.post_status,
-                    amount_of_like: likeMap[post.post_id] || 0,
-                    amount_of_save: post.amount_of_save || 0,
-                    amount_of_comment: post.amount_of_comment || 0,
-                  },
-                  user: {
-                    uid: post.uid,
-                    name: post.name,
-                    email: post.email,
-                    personal_description: post.personal_description,
-                    profile_image: post.profile_image,
-                    height: post.height,
-                    weight: post.weight,
-                    shirt_size: post.shirt_size,
-                    chest: post.chest,
-                    waist_circumference: post.waist_circumference,
-                    hip: post.hip
-                  },
-                  images,
-                  categories,
-                  hashtags
-                };
-              });
-
-              res.status(200).json(postsWithData);
             });
           });
         });
@@ -122,6 +158,7 @@ router.get("/get", (req, res) => {
     return res.status(500).json({ error: 'Server error' });
   }
 });
+
 
 
 const admin = require('firebase-admin');
@@ -393,21 +430,106 @@ router.get('/saved-posts/:user_id', (req, res) => {
 // เพิ่มโพสต์พร้อมรูปภาพ, หมวดหมู่ และแฮชแท็ก
 // --------------------------------------------
 
-router.use(express.json({ limit: '50mb' })); // รองรับ Base64 ขนาดใหญ่
-const axios = require('axios');
-const sharp = require('sharp');
-require('dotenv').config();  // ต้องอยู่บนสุด
-const vision = require('@google-cloud/vision');
-const { Translate } = require('@google-cloud/translate').v2;
+// router.use(express.json({ limit: '50mb' })); // รองรับ Base64 ขนาดใหญ่
+// const axios = require('axios');
+// const sharp = require('sharp');
+// require('dotenv').config();  // ต้องอยู่บนสุด
+// const vision = require('@google-cloud/vision');
+// const { Translate } = require('@google-cloud/translate').v2;
 
-// Google credentials from JSON env
-const visionCreds = JSON.parse(process.env.GOOGLE_VISION_CREDENTIALS_JSON);
-const translateCreds = JSON.parse(process.env.GOOGLE_TRANSLATE_CREDENTIALS_JSON);
+// // Google credentials from JSON env
+// const visionCreds = JSON.parse(process.env.GOOGLE_VISION_CREDENTIALS_JSON);
+// const translateCreds = JSON.parse(process.env.GOOGLE_TRANSLATE_CREDENTIALS_JSON);
 
-const visionClient = new vision.ImageAnnotatorClient({ credentials: visionCreds });
-const translateClient = new Translate({ credentials: translateCreds, projectId: translateCreds.project_id });
+// const visionClient = new vision.ImageAnnotatorClient({ credentials: visionCreds });
+// const translateClient = new Translate({ credentials: translateCreds, projectId: translateCreds.project_id });
 
-// POST /post/add
+// // POST /post/add
+// router.post('/post/add', async (req, res) => {
+//   try {
+//     let { post_topic, post_description, post_fk_uid, images, category_id_fk, hashtags, post_status } = req.body;
+//     post_topic = post_topic?.trim() || null;
+//     post_description = post_description?.trim() || null;
+//     post_status = (post_status?.toLowerCase() === 'friends') ? 'friends' : 'public';
+
+//     if (!post_fk_uid || !Array.isArray(images) || images.length === 0) {
+//       return res.status(400).json({ error: 'Missing required fields' });
+//     }
+
+//     // Insert post
+//     const postResult = await new Promise((resolve, reject) => {
+//       const sql = `INSERT INTO post (post_topic, post_description, post_date, post_fk_uid, post_status) VALUES (?, ?, NOW(), ?, ?)`;
+//       conn.query(sql, [post_topic, post_description, post_fk_uid, post_status], (err, result) => err ? reject(err) : resolve(result));
+//     });
+
+//     const insertedPostId = postResult.insertId;
+
+//     // วิเคราะห์ภาพ
+//     const visionResults = [];
+//     for (const img of images) {
+//       try {
+//         // ตรวจสอบว่าฐานข้อมูลเป็น URL หรือ Base64
+//         const isBase64 = !img.startsWith('http');
+//         const request = isBase64
+//           ? { image: { content: img } }
+//           : { image: { source: { imageUri: img } } };
+
+//         const [visionResult] = await visionClient.labelDetection(request);
+
+//         const labels = [];
+//         if (visionResult.labelAnnotations) {
+//           for (const label of visionResult.labelAnnotations) {
+//             const description = label.description;
+//             const [translation] = await translateClient.translate(description, 'th');
+//             labels.push({ en: description, th: translation });
+//           }
+//         } else {
+//           console.log('⚠️ Vision AI returned empty labels for this image');
+//         }
+
+//         visionResults.push({ image: img, labels });
+//       } catch (err) {
+//         console.error('Error analyzing image', err);
+//         visionResults.push({ image: img, labels: [], error: err.message });
+//       }
+//     }
+
+//     // Insert image_post
+//     if (images.length > 0) {
+//       const sql = `INSERT INTO image_post (image, image_fk_postid) VALUES ?`;
+//       const values = images.map(img => [img, insertedPostId]);
+//       await new Promise((resolve, reject) => conn.query(sql, [values], (err) => err ? reject(err) : resolve()));
+//     }
+
+//     // Insert post_image_analysis
+//     if (visionResults.length > 0) {
+//       const sql = `INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text, created_at) VALUES ?`;
+//       const values = visionResults.map(vr => [insertedPostId, vr.image, JSON.stringify(vr.labels), new Date()]);
+//       await new Promise((resolve, reject) => conn.query(sql, [values], (err) => err ? reject(err) : resolve()));
+//     }
+
+//     // Insert categories
+//     if (Array.isArray(category_id_fk) && category_id_fk.length > 0) {
+//       const sql = `INSERT INTO post_category (category_id_fk, post_id_fk) VALUES ?`;
+//       const values = category_id_fk.map(cid => [cid, insertedPostId]);
+//       await new Promise((resolve, reject) => conn.query(sql, [values], (err) => err ? reject(err) : resolve()));
+//     }
+
+//     // Insert hashtags
+//     if (Array.isArray(hashtags) && hashtags.length > 0) {
+//       const sql = `INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?`;
+//       const values = hashtags.map(tagId => [insertedPostId, tagId]);
+//       await new Promise((resolve, reject) => conn.query(sql, [values], (err) => err ? reject(err) : resolve()));
+//     }
+
+//     res.status(201).json({ message: 'Post created', post_id: insertedPostId, visionResults });
+//   } catch (error) {
+//     console.error(error);
+//     res.status(500).json({ error: 'Internal server error' });
+//   }
+// });
+
+
 router.post('/post/add', async (req, res) => {
   try {
     let { post_topic, post_description, post_fk_uid, images, category_id_fk, hashtags, post_status } = req.body;
@@ -421,63 +543,126 @@ router.post('/post/add', async (req, res) => {
 
     // Insert post
     const postResult = await new Promise((resolve, reject) => {
-      const sql = `INSERT INTO post (post_topic, post_description, post_date, post_fk_uid, post_status) VALUES (?, ?, NOW(), ?, ?)`;
-      conn.query(sql, [post_topic, post_description, post_fk_uid, post_status], (err, result) => err ? reject(err) : resolve(result));
+      const sql = `INSERT INTO post (post_topic, post_description, post_date, post_fk_uid, post_status) 
+                   VALUES (?, ?, NOW(), ?, ?)`;
+      conn.query(sql, [post_topic, post_description, post_fk_uid, post_status],
+        (err, result) => err ? reject(err) : resolve(result)
+      );
     });
 
     const insertedPostId = postResult.insertId;
 
-    // วิเคราะห์ภาพ
-    const visionResults = [];
-    for (const img of images) {
-      try {
-        // ถ้า Base64: { content: "..." } หรือ URL: { source: { imageUri: img } }
-        const request = img.startsWith('http') ? { image: { source: { imageUri: img } } } : { image: { content: img } };
-
-        const [visionResult] = await visionClient.labelDetection(request);
-
-        const labels = [];
-        for (const label of visionResult.labelAnnotations) {
-          const description = label.description;
-          const [translation] = await translateClient.translate(description, 'th');
-          labels.push({ en: description, th: translation });
-        }
-        visionResults.push({ image: img, labels });
-      } catch (err) {
-        console.error('Error analyzing image', err);
-        visionResults.push({ image: img, labels: [], error: err.message });
-      }
-    }
-
-    // Insert image_post
+    // Insert images
     if (images.length > 0) {
       const sql = `INSERT INTO image_post (image, image_fk_postid) VALUES ?`;
       const values = images.map(img => [img, insertedPostId]);
-      await new Promise((resolve, reject) => conn.query(sql, [values], (err) => err ? reject(err) : resolve()));
-    }
-
-    // Insert post_image_analysis
-    if (visionResults.length > 0) {
-      const sql = `INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text, created_at) VALUES ?`;
-      const values = visionResults.map(vr => [insertedPostId, vr.image, JSON.stringify(vr.labels), new Date()]);
-      await new Promise((resolve, reject) => conn.query(sql, [values], (err) => err ? reject(err) : resolve()));
+      await new Promise((resolve, reject) =>
+        conn.query(sql, [values], (err) => err ? reject(err) : resolve())
+      );
     }
 
     // Insert categories
     if (Array.isArray(category_id_fk) && category_id_fk.length > 0) {
       const sql = `INSERT INTO post_category (category_id_fk, post_id_fk) VALUES ?`;
       const values = category_id_fk.map(cid => [cid, insertedPostId]);
-      await new Promise((resolve, reject) => conn.query(sql, [values], (err) => err ? reject(err) : resolve()));
+      await new Promise((resolve, reject) =>
+        conn.query(sql, [values], (err) => err ? reject(err) : resolve())
+      );
     }
 
     // Insert hashtags
     if (Array.isArray(hashtags) && hashtags.length > 0) {
       const sql = `INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?`;
       const values = hashtags.map(tagId => [insertedPostId, tagId]);
-      await new Promise((resolve, reject) => conn.query(sql, [values], (err) => err ? reject(err) : resolve()));
+      await new Promise((resolve, reject) =>
+        conn.query(sql, [values], (err) => err ? reject(err) : resolve())
+      );
     }
 
-    res.status(201).json({ message: 'Post created', post_id: insertedPostId, visionResults });
+    // 🔹 ดึงโพสต์ที่เพิ่งสร้าง + user + images + categories + hashtags
+    const postSql = `
+      SELECT 
+        post.*, user.uid, user.name, user.email, user.personal_description, user.profile_image,
+        user.height, user.weight, user.shirt_size, user.chest, user.waist_circumference, user.hip
+      FROM post
+      JOIN user ON post.post_fk_uid = user.uid
+      WHERE post.post_id = ?
+    `;
+    const postData = await new Promise((resolve, reject) =>
+      conn.query(postSql, [insertedPostId], (err, results) => err ? reject(err) : resolve(results[0]))
+    );
+
+    // ดึง image
+    const imageResults = await new Promise((resolve, reject) =>
+      conn.query(`SELECT * FROM image_post WHERE image_fk_postid = ?`, [insertedPostId], (err, results) => err ? reject(err) : resolve(results))
+    );
+
+    // ดึง category
+    const categoryResults = await new Promise((resolve, reject) =>
+      conn.query(`
+        SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
+        FROM post_category pc
+        JOIN category c ON pc.category_id_fk = c.cid
+        WHERE pc.post_id_fk = ?`, [insertedPostId], (err, results) => err ? reject(err) : resolve(results))
+    );
+
+    // ดึง hashtags
+    const hashtagResults = await new Promise((resolve, reject) =>
+      conn.query(`
+        SELECT ph.post_id_fk, h.tag_id, h.tag_name 
+        FROM post_hashtags ph
+        JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
+        WHERE ph.post_id_fk = ?`, [insertedPostId], (err, results) => err ? reject(err) : resolve(results))
+    );
+
+    const sizeMap = { XS: 1, S: 2, M: 3, L: 4, XL: 5, XXL: 6 };
+
+    function calcDistance(u1, u2) {
+      const shirt1 = sizeMap[u1.shirt_size] || 0;
+      const shirt2 = sizeMap[u2.shirt_size] || 0;
+      return Math.sqrt(
+        Math.pow((u1.height || 0) - (u2.height || 0), 2) +
+        Math.pow((u1.weight || 0) - (u2.weight || 0), 2) +
+        Math.pow((u1.chest || 0) - (u2.chest || 0), 2) +
+        Math.pow((u1.waist_circumference || 0) - (u2.waist_circumference || 0), 2) +
+        Math.pow((u1.hip || 0) - (u2.hip || 0), 2) +
+        Math.pow(shirt1 - shirt2, 2)
+      );
+    }
+
+    const responseData = {
+      post: {
+        post_id: postData.post_id,
+        post_topic: postData.post_topic,
+        post_description: postData.post_description,
+        post_date: postData.post_date,
+        post_fk_cid: postData.post_fk_cid,
+        post_fk_uid: postData.post_fk_uid,
+        post_status: postData.post_status,
+        amount_of_like: 0,
+        amount_of_save: postData.amount_of_save || 0,
+        amount_of_comment: postData.amount_of_comment || 0
+      },
+      user: {
+        uid: postData.uid,
+        name: postData.name,
+        email: postData.email,
+        personal_description: postData.personal_description,
+        profile_image: postData.profile_image,
+        height: postData.height,
+        weight: postData.weight,
+        shirt_size: postData.shirt_size,
+        chest: postData.chest,
+        waist_circumference: postData.waist_circumference,
+        hip: postData.hip
+      },
+      images: imageResults,
+      categories: categoryResults.map(c => ({ cid: c.cid, cname: c.cname, cimage: c.cimage, ctype: c.ctype })),
+      hashtags: hashtagResults.map(h => ({ tag_id: h.tag_id, tag_name: h.tag_name })),
+      similarity_distance: 0 // ของตัวเอง distance = 0
+    };
+
+    res.status(201).json({ message: 'Post created', post: responseData });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Internal server error' });
@@ -1167,9 +1352,9 @@ router.put('/notification/read/:notification_id', (req, res) => {
 // POST /comment
 router.post('/comment', (req, res) => {
   const { user_id, post_id, comment_text } = req.body;
-  
+
   console.log('[Comment] Request body:', req.body);
-  
+
   if (!user_id || !post_id || !comment_text) {
     console.log('[Comment] Missing user_id, post_id, or comment_text');
     return res.status(400).json({ error: 'user_id, post_id, and comment_text are required' });
@@ -1180,52 +1365,52 @@ router.post('/comment', (req, res) => {
     INSERT INTO post_comments (user_id_fk, post_id_fk, comment_text)
     VALUES (?, ?, ?)
   `;
-  
+
   conn.query(insertSql, [user_id, post_id, comment_text], (err, result) => {
     if (err) {
       console.log('[Comment] Insert comment failed:', err);
       return res.status(500).json({ error: 'Comment insert failed' });
     }
-    
+
     const comment_id = result.insertId;
     console.log(`[Comment] User ${user_id} commented on post ${post_id} (comment_id: ${comment_id})`);
-    
+
     // 2️⃣ หาว่าเจ้าของโพสต์เป็นใคร
     const ownerSql = 'SELECT post_fk_uid FROM post WHERE post_id = ?';
-    
+
     console.log('[Comment] Querying post owner for post_id:', post_id);
-    
+
     conn.query(ownerSql, [post_id], (err2, ownerResult) => {
       if (err2) {
         console.log('[Comment] Get post owner failed:', err2);
         return res.status(500).json({ error: 'Get post owner failed' });
       }
-      
+
       console.log('[Comment] Post owner query result:', ownerResult);
-      
+
       if (ownerResult.length > 0) {
         const receiver_uid = ownerResult[0].post_fk_uid;
-        
+
         console.log('[Comment] Post owner (receiver_uid):', receiver_uid);
         console.log('[Comment] Comment author (user_id):', user_id);
         console.log('[Comment] Should create notification?', receiver_uid !== user_id);
-        
+
         // ไม่ส่ง notification ถ้าเจ้าของโพสต์คอมเมนต์ตัวเอง
         if (receiver_uid !== user_id) {
           const message = 'ได้คอมเมนต์โพสต์ของคุณ';
-          
+
           console.log('[Comment] Creating notification...');
-          
+
           // 🔹 Insert notification ลง MySQL
           const notifSql = `
             INSERT INTO notifications (sender_uid, receiver_uid, post_id, type, message, is_read)
             VALUES (?, ?, ?, 'comment', ?, 0)
           `;
-          
+
           const notifValues = [user_id, receiver_uid, post_id, message];
           console.log('[Comment] Notification SQL:', notifSql);
           console.log('[Comment] Notification values:', notifValues);
-          
+
           conn.query(notifSql, notifValues, (err3, result3) => {
             if (err3) {
               console.log('[Comment] Notification insert failed (MySQL):', err3);
@@ -1240,7 +1425,7 @@ router.post('/comment', (req, res) => {
               console.log('[Comment] Insert result:', result3);
             }
           });
-          
+
           // 🔹 Insert notification ลง Firebase Realtime Database
           const notifData = {
             sender_uid: user_id,
@@ -1251,10 +1436,10 @@ router.post('/comment', (req, res) => {
             is_read: false,
             created_at: admin.database.ServerValue.TIMESTAMP
           };
-          
+
           const db = admin.database();
           const notifRef = db.ref('notifications').push();
-          
+
           notifRef.set(notifData)
             .then(() => {
               console.log('[Comment] ✅ Notification added to Firebase with key:', notifRef.key);
@@ -1262,18 +1447,18 @@ router.post('/comment', (req, res) => {
             .catch((firebaseErr) => {
               console.log('[Comment] Firebase notification insert failed:', firebaseErr);
             });
-            
+
         } else {
           console.log('[Comment] 🚫 Skipping notification - user commented on own post');
         }
       } else {
         console.log('[Comment] ⚠️  No post found with post_id:', post_id);
       }
-      
+
       // ส่ง response กลับ
       console.log('[Comment] Sending response...');
-      res.status(200).json({ 
-        message: 'Comment added', 
+      res.status(200).json({
+        message: 'Comment added',
         comment_id: comment_id,
         debug: {
           user_id,
