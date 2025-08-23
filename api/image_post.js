@@ -9,9 +9,9 @@ module.exports = router;
 // API GET /get
 // ดึงโพสต์ทั้งหมด พร้อมข้อมูลผู้ใช้ รูปภาพ หมวดหมู่ แฮชแท็ก และจำนวนไลก์
 // --------------------------------------------
-router.get("/get", (req, res) => {
+router.get("/post/feed/:userId", (req, res) => {
   try {
-    const targetUid = req.query.uid;
+    const targetUid = req.params.userId;   // 👈 ดึง userId จาก params
     const mode = req.query.mode || "feed"; 
     const firstLoad = req.query.firstLoad === "true"; 
 
@@ -36,15 +36,12 @@ router.get("/get", (req, res) => {
       `;
 
       if (firstLoad) {
-        // ✅ โหลดครั้งแรก: เอาโพสต์ล่าสุดของตัวเองแค่ 1 โพสต์
         postSql += ` WHERE post.post_fk_uid = ${conn.escape(targetUid)} 
                      ORDER BY post.post_date DESC LIMIT 1 `;
       } else if (mode === "feed") {
-        // ✅ โหลด feed: เอาโพสต์ของคนอื่น
         postSql += ` WHERE post.post_fk_uid != ${conn.escape(targetUid)} 
                      ORDER BY post.post_date DESC `;
       } else if (mode === "self") {
-        // ✅ self mode: เอาโพสต์ทั้งหมดของตัวเอง
         postSql += ` WHERE post.post_fk_uid = ${conn.escape(targetUid)} 
                      ORDER BY post.post_date DESC `;
       }
@@ -53,12 +50,10 @@ router.get("/get", (req, res) => {
         if (err) return res.status(400).json({ error: 'Post query error' });
         if (postResults.length === 0) return res.status(404).json({ error: 'No posts found' });
 
-        // ถ้า firstLoad = true → ส่งคืนแค่โพสต์ล่าสุดของตัวเอง
         if (firstLoad) {
           return res.status(200).json(postResults);
         }
 
-        // 🔹 โหลดข้อมูลประกอบ (image, category, hashtag, like) สำหรับ feed หรือ self
         const imageSql = `SELECT * FROM image_post`;
         conn.query(imageSql, (err, imageResults) => {
           if (err) return res.status(400).json({ error: 'Image query error' });
@@ -532,6 +527,8 @@ router.get('/saved-posts/:user_id', (req, res) => {
 router.post('/post/add', async (req, res) => {
   try {
     let { post_topic, post_description, post_fk_uid, images, category_id_fk, hashtags, post_status } = req.body;
+
+    // trim และค่า default
     post_topic = post_topic?.trim() || null;
     post_description = post_description?.trim() || null;
     post_status = (post_status?.toLowerCase() === 'friends') ? 'friends' : 'public';
@@ -540,102 +537,80 @@ router.post('/post/add', async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // Insert post
+    // 1️⃣ Insert post
     const postResult = await new Promise((resolve, reject) => {
       const sql = `INSERT INTO post (post_topic, post_description, post_date, post_fk_uid, post_status) 
                    VALUES (?, ?, NOW(), ?, ?)`;
-      conn.query(sql, [post_topic, post_description, post_fk_uid, post_status],
-        (err, result) => err ? reject(err) : resolve(result)
-      );
+      conn.query(sql, [post_topic, post_description, post_fk_uid, post_status], (err, result) => {
+        if (err) reject(err);
+        else resolve(result);
+      });
     });
 
     const insertedPostId = postResult.insertId;
 
-    // Insert images
+    // 2️⃣ Insert images
     if (images.length > 0) {
       const sql = `INSERT INTO image_post (image, image_fk_postid) VALUES ?`;
       const values = images.map(img => [img, insertedPostId]);
-      await new Promise((resolve, reject) =>
-        conn.query(sql, [values], (err) => err ? reject(err) : resolve())
-      );
+      await new Promise((resolve, reject) => conn.query(sql, [values], err => err ? reject(err) : resolve()));
     }
 
-    // Insert categories
+    // 3️⃣ Insert categories
     if (Array.isArray(category_id_fk) && category_id_fk.length > 0) {
       const sql = `INSERT INTO post_category (category_id_fk, post_id_fk) VALUES ?`;
       const values = category_id_fk.map(cid => [cid, insertedPostId]);
-      await new Promise((resolve, reject) =>
-        conn.query(sql, [values], (err) => err ? reject(err) : resolve())
-      );
+      await new Promise((resolve, reject) => conn.query(sql, [values], err => err ? reject(err) : resolve()));
     }
 
-    // Insert hashtags
+    // 4️⃣ Insert hashtags
     if (Array.isArray(hashtags) && hashtags.length > 0) {
       const sql = `INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?`;
       const values = hashtags.map(tagId => [insertedPostId, tagId]);
-      await new Promise((resolve, reject) =>
-        conn.query(sql, [values], (err) => err ? reject(err) : resolve())
-      );
+      await new Promise((resolve, reject) => conn.query(sql, [values], err => err ? reject(err) : resolve()));
     }
 
-    // 🔹 ดึงโพสต์ที่เพิ่งสร้าง + user + images + categories + hashtags
-    const postSql = `
-      SELECT 
-        post.*, user.uid, user.name, user.email, user.personal_description, user.profile_image,
-        user.height, user.weight, user.shirt_size, user.chest, user.waist_circumference, user.hip
-      FROM post
-      JOIN user ON post.post_fk_uid = user.uid
-      WHERE post.post_id = ?
-    `;
-    const postData = await new Promise((resolve, reject) =>
-      conn.query(postSql, [insertedPostId], (err, results) => err ? reject(err) : resolve(results[0]))
-    );
+    // 5️⃣ ดึงโพสต์พร้อม user, images, categories, hashtags
+    const postData = await new Promise((resolve, reject) => {
+      const sql = `
+        SELECT p.*, u.uid, u.name, u.email, u.personal_description, u.profile_image,
+               u.height, u.weight, u.shirt_size, u.chest, u.waist_circumference, u.hip
+        FROM post p
+        JOIN user u ON p.post_fk_uid = u.uid
+        WHERE p.post_id = ?
+      `;
+      conn.query(sql, [insertedPostId], (err, results) => err ? reject(err) : resolve(results[0]));
+    });
 
-    // ดึง image
     const imageResults = await new Promise((resolve, reject) =>
       conn.query(`SELECT * FROM image_post WHERE image_fk_postid = ?`, [insertedPostId], (err, results) => err ? reject(err) : resolve(results))
     );
 
-    // ดึง category
     const categoryResults = await new Promise((resolve, reject) =>
       conn.query(`
         SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
         FROM post_category pc
         JOIN category c ON pc.category_id_fk = c.cid
-        WHERE pc.post_id_fk = ?`, [insertedPostId], (err, results) => err ? reject(err) : resolve(results))
+        WHERE pc.post_id_fk = ?
+      `, [insertedPostId], (err, results) => err ? reject(err) : resolve(results))
     );
 
-    // ดึง hashtags
     const hashtagResults = await new Promise((resolve, reject) =>
       conn.query(`
         SELECT ph.post_id_fk, h.tag_id, h.tag_name 
         FROM post_hashtags ph
         JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
-        WHERE ph.post_id_fk = ?`, [insertedPostId], (err, results) => err ? reject(err) : resolve(results))
+        WHERE ph.post_id_fk = ?
+      `, [insertedPostId], (err, results) => err ? reject(err) : resolve(results))
     );
 
-    const sizeMap = { XS: 1, S: 2, M: 3, L: 4, XL: 5, XXL: 6 };
-
-    function calcDistance(u1, u2) {
-      const shirt1 = sizeMap[u1.shirt_size] || 0;
-      const shirt2 = sizeMap[u2.shirt_size] || 0;
-      return Math.sqrt(
-        Math.pow((u1.height || 0) - (u2.height || 0), 2) +
-        Math.pow((u1.weight || 0) - (u2.weight || 0), 2) +
-        Math.pow((u1.chest || 0) - (u2.chest || 0), 2) +
-        Math.pow((u1.waist_circumference || 0) - (u2.waist_circumference || 0), 2) +
-        Math.pow((u1.hip || 0) - (u2.hip || 0), 2) +
-        Math.pow(shirt1 - shirt2, 2)
-      );
-    }
-
+    // 6️⃣ สร้าง response
     const responseData = {
       post: {
         post_id: postData.post_id,
         post_topic: postData.post_topic,
         post_description: postData.post_description,
         post_date: postData.post_date,
-        post_fk_cid: postData.post_fk_cid,
         post_fk_uid: postData.post_fk_uid,
         post_status: postData.post_status,
         amount_of_like: 0,
@@ -657,17 +632,16 @@ router.post('/post/add', async (req, res) => {
       },
       images: imageResults,
       categories: categoryResults.map(c => ({ cid: c.cid, cname: c.cname, cimage: c.cimage, ctype: c.ctype })),
-      hashtags: hashtagResults.map(h => ({ tag_id: h.tag_id, tag_name: h.tag_name })),
-      similarity_distance: 0 // ของตัวเอง distance = 0
+      hashtags: hashtagResults.map(h => ({ tag_id: h.tag_id, tag_name: h.tag_name }))
     };
 
     res.status(201).json({ message: 'Post created', post: responseData });
+
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 // --------------------------------------------
 // API GET /by-user/:uid
 // ดึงโพสต์ทั้งหมดของผู้ใช้คนหนึ่ง พร้อมรูปภาพและหมวดหมู่
