@@ -12,7 +12,7 @@ module.exports = router;
 router.get("/get", (req, res) => {
   try {
     const targetUid = req.query.uid;
-    const mode = req.query.mode || "feed"; // ค่า default = feed
+    const firstLoad = req.query.firstLoad === "true"; // true = โหลดครั้งแรก
 
     if (!targetUid) {
       return res.status(400).json({ error: "Target uid is required" });
@@ -37,13 +37,16 @@ router.get("/get", (req, res) => {
         JOIN user ON post.post_fk_uid = user.uid
       `;
 
-      if (mode === "self") {
-        postSql += ` WHERE post.post_fk_uid = ${conn.escape(targetUid)} `;
-      } else if (mode === "feed") {
-        postSql += ` WHERE post.post_fk_uid != ${conn.escape(targetUid)} `;
+      if (firstLoad) {
+        // แสดงโพสต์ตัวเองล่าสุดที่โพสต์ไม่เกิน 1 นาที
+        postSql += ` WHERE post.post_fk_uid = ${conn.escape(targetUid)}
+                     AND post.post_date >= NOW() - INTERVAL 1 MINUTE
+                     ORDER BY post.post_date DESC LIMIT 1`;
+      } else {
+        // แสดงโพสต์คนอื่นทั้งหมด
+        postSql += ` WHERE post.post_fk_uid != ${conn.escape(targetUid)}
+                     ORDER BY post.post_date DESC`;
       }
-
-      postSql += ` ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC`;
 
       conn.query(postSql, (err, postResults) => {
         if (err) return res.status(400).json({ error: 'Post query error' });
@@ -82,10 +85,8 @@ router.get("/get", (req, res) => {
                   likeMap[item.post_id] = item.like_count;
                 });
 
-                // map size
                 const sizeMap = { XS: 1, S: 2, M: 3, L: 4, XL: 5, XXL: 6 };
 
-                // ฟังก์ชันคำนวณ distance
                 function calcDistance(u1, u2) {
                   const shirt1 = sizeMap[u1.shirt_size] || 0;
                   const shirt2 = sizeMap[u2.shirt_size] || 0;
