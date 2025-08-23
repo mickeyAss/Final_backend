@@ -13,6 +13,7 @@ router.get("/get", (req, res) => {
   try {
     const targetUid = req.query.uid;
     const mode = req.query.mode || "feed"; // ค่า default = feed
+    const firstLoad = req.query.firstLoad === "true"; // เช็คว่าครั้งแรกหรือไม่
 
     if (!targetUid) {
       return res.status(400).json({ error: "Target uid is required" });
@@ -37,18 +38,27 @@ router.get("/get", (req, res) => {
         JOIN user ON post.post_fk_uid = user.uid
       `;
 
-      if (mode === "self") {
+      // 🔹 กรณีโหลดครั้งแรก → แสดงโพสต์ล่าสุดของตัวเอง
+      if (firstLoad) {
         postSql += ` WHERE post.post_fk_uid = ${conn.escape(targetUid)} `;
-      } else if (mode === "feed") {
+        postSql += ` ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC LIMIT 1 `;
+      } 
+      // 🔹 โหลดแบบ feed ปกติ → แสดงโพสต์ของคนอื่น
+      else if (mode === "feed") {
         postSql += ` WHERE post.post_fk_uid != ${conn.escape(targetUid)} `;
+        postSql += ` ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC `;
+      } 
+      // 🔹 self mode → แสดงทุกโพสต์ของตัวเอง
+      else if (mode === "self") {
+        postSql += ` WHERE post.post_fk_uid = ${conn.escape(targetUid)} `;
+        postSql += ` ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC `;
       }
-
-      postSql += ` ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC`;
 
       conn.query(postSql, (err, postResults) => {
         if (err) return res.status(400).json({ error: 'Post query error' });
         if (postResults.length === 0) return res.status(404).json({ error: 'No posts found' });
 
+        // --------------------- (โค้ด image, category, hashtag, like, distance mapping เหมือนเดิม) ---------------------
         const imageSql = `SELECT * FROM image_post`;
         conn.query(imageSql, (err, imageResults) => {
           if (err) return res.status(400).json({ error: 'Image query error' });
@@ -82,10 +92,8 @@ router.get("/get", (req, res) => {
                   likeMap[item.post_id] = item.like_count;
                 });
 
-                // map size
                 const sizeMap = { XS: 1, S: 2, M: 3, L: 4, XL: 5, XXL: 6 };
 
-                // ฟังก์ชันคำนวณ distance
                 function calcDistance(u1, u2) {
                   const shirt1 = sizeMap[u1.shirt_size] || 0;
                   const shirt2 = sizeMap[u2.shirt_size] || 0;
@@ -151,9 +159,7 @@ router.get("/get", (req, res) => {
                   };
                 });
 
-                // เรียงใกล้ → ไกล
                 postsWithData.sort((a, b) => a.similarity_distance - b.similarity_distance);
-
                 res.status(200).json(postsWithData);
               });
             });
