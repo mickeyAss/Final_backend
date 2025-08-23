@@ -547,11 +547,14 @@ router.get('/saved-posts/:user_id', (req, res) => {
 //   }
 // });
 
+const path = require('path');
 const vision = require('@google-cloud/vision');
 
-// สร้าง client ของ Google Vision โดยใช้ไฟล์ JSON path โดยตรง
+// __dirname = api/
+const keyFilePath = path.join(__dirname, '..', 'config', 'heroic-purpose-464720-v1-e9f63d38f25c.json');
+
 const visionClient = new vision.ImageAnnotatorClient({
-  keyFilename: 'D:/Project Appication/final_project_backend/heroic-purpose-464720-v1-e9f63d38f25c.json'
+  keyFilename: keyFilePath
 });
 
 router.post('/post/add', async (req, res) => {
