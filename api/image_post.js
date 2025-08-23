@@ -11,24 +11,21 @@ module.exports = router;
 // --------------------------------------------
 router.get("/get", (req, res) => {
   try {
-    const targetUid = req.query.uid;
+    const targetUid = req.query.uid; // uid ที่ต้องการเปรียบเทียบ
+
     if (!targetUid) {
       return res.status(400).json({ error: "Target uid is required" });
     }
 
-    const firstLoad = req.query.firstLoad === "true"; // ถ้าต้องการ
-    const mode = req.query.mode || "feed";
-
     // ดึง target user
     const userSql = `SELECT * FROM user WHERE uid = ?`;
     conn.query(userSql, [targetUid], (err, targetResults) => {
-      if (err) return res.status(400).json({ error: 'User query error' });
-      if (targetResults.length === 0) return res.status(404).json({ error: 'User not found' });
+      if (err) return res.status(400).json({ error: 'Target user query error' });
+      if (targetResults.length === 0) return res.status(404).json({ error: 'Target user not found' });
 
       const targetUser = targetResults[0];
 
-      // ดึงโพสต์ทั้งหมด (รวมตัวเอง + คนอื่น) เรียงล่าสุดก่อน
-      let postSql = `
+      const postSql = `
         SELECT 
           post.*, 
           user.uid, user.name, user.email, 
@@ -37,52 +34,54 @@ router.get("/get", (req, res) => {
           user.chest, user.waist_circumference, user.hip
         FROM post
         JOIN user ON post.post_fk_uid = user.uid
-        ORDER BY post.post_date DESC
+        ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC
       `;
 
       conn.query(postSql, (err, postResults) => {
         if (err) return res.status(400).json({ error: 'Post query error' });
-
         if (postResults.length === 0) return res.status(404).json({ error: 'No posts found' });
 
-        // ดึง image, category, hashtag, like
         const imageSql = `SELECT * FROM image_post`;
-        const categorySql = `
-          SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
-          FROM post_category pc
-          JOIN category c ON pc.category_id_fk = c.cid
-        `;
-        const hashtagSql = `
-          SELECT ph.post_id_fk, h.tag_id, h.tag_name 
-          FROM post_hashtags ph
-          JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
-        `;
-        const likeSql = `
-          SELECT post_id_fk AS post_id, COUNT(*) AS like_count
-          FROM post_likes
-          GROUP BY post_id_fk
-        `;
-
-        conn.query(imageSql, (err, images) => {
+        conn.query(imageSql, (err, imageResults) => {
           if (err) return res.status(400).json({ error: 'Image query error' });
 
-          conn.query(categorySql, (err, categories) => {
+          const categorySql = `
+            SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
+            FROM post_category pc
+            JOIN category c ON pc.category_id_fk = c.cid
+          `;
+          conn.query(categorySql, (err, categoryResults) => {
             if (err) return res.status(400).json({ error: 'Category query error' });
 
-            conn.query(hashtagSql, (err, hashtags) => {
+            const hashtagSql = `
+              SELECT ph.post_id_fk, h.tag_id, h.tag_name 
+              FROM post_hashtags ph
+              JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
+            `;
+            conn.query(hashtagSql, (err, hashtagResults) => {
               if (err) return res.status(400).json({ error: 'Hashtag query error' });
 
+              const likeSql = `
+                SELECT post_id_fk AS post_id, COUNT(*) AS like_count 
+                FROM post_likes 
+                GROUP BY post_id_fk
+              `;
               conn.query(likeSql, (err, likeResults) => {
-                if (err) return res.status(400).json({ error: 'Like query error' });
+                if (err) return res.status(400).json({ error: 'Like count query error' });
 
                 const likeMap = {};
-                likeResults.forEach(item => likeMap[item.post_id] = item.like_count);
+                likeResults.forEach(item => {
+                  likeMap[item.post_id] = item.like_count;
+                });
 
+                // map size
                 const sizeMap = { XS: 1, S: 2, M: 3, L: 4, XL: 5, XXL: 6 };
 
+                // ฟังก์ชันคำนวณ distance
                 function calcDistance(u1, u2) {
                   const shirt1 = sizeMap[u1.shirt_size] || 0;
                   const shirt2 = sizeMap[u2.shirt_size] || 0;
+
                   return Math.sqrt(
                     Math.pow((u1.height || 0) - (u2.height || 0), 2) +
                     Math.pow((u1.weight || 0) - (u2.weight || 0), 2) +
@@ -94,13 +93,22 @@ router.get("/get", (req, res) => {
                 }
 
                 const postsWithData = postResults.map(post => {
-                  const postImages = images.filter(img => img.image_fk_postid === post.post_id);
-                  const postCategories = categories
-                    .filter(c => c.post_id_fk === post.post_id)
-                    .map(c => ({ cid: c.cid, cname: c.cname, cimage: c.cimage, ctype: c.ctype }));
-                  const postHashtags = hashtags
-                    .filter(h => h.post_id_fk === post.post_id)
-                    .map(h => ({ tag_id: h.tag_id, tag_name: h.tag_name }));
+                  const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
+                  const categories = categoryResults
+                    .filter(cat => cat.post_id_fk === post.post_id)
+                    .map(cat => ({
+                      cid: cat.cid,
+                      cname: cat.cname,
+                      cimage: cat.cimage,
+                      ctype: cat.ctype
+                    }));
+
+                  const hashtags = hashtagResults
+                    .filter(ht => ht.post_id_fk === post.post_id)
+                    .map(ht => ({
+                      tag_id: ht.tag_id,
+                      tag_name: ht.tag_name
+                    }));
 
                   return {
                     post: {
@@ -108,11 +116,12 @@ router.get("/get", (req, res) => {
                       post_topic: post.post_topic,
                       post_description: post.post_description,
                       post_date: post.post_date,
+                      post_fk_cid: post.post_fk_cid,
                       post_fk_uid: post.post_fk_uid,
                       post_status: post.post_status,
                       amount_of_like: likeMap[post.post_id] || 0,
                       amount_of_save: post.amount_of_save || 0,
-                      amount_of_comment: post.amount_of_comment || 0
+                      amount_of_comment: post.amount_of_comment || 0,
                     },
                     user: {
                       uid: post.uid,
@@ -127,14 +136,14 @@ router.get("/get", (req, res) => {
                       waist_circumference: post.waist_circumference,
                       hip: post.hip
                     },
-                    images: postImages,
-                    categories: postCategories,
-                    hashtags: postHashtags,
-                    similarity_distance: calcDistance(post, targetUser)
+                    images,
+                    categories,
+                    hashtags,
+                    similarity_distance: calcDistance(post, targetUser) // ✅ เพิ่มตรงนี้
                   };
                 });
 
-                // เรียงโพสต์ตาม distance ใกล้ → ไกล
+                // เรียงจากใกล้ → ไกล
                 postsWithData.sort((a, b) => a.similarity_distance - b.similarity_distance);
 
                 res.status(200).json(postsWithData);
@@ -145,8 +154,8 @@ router.get("/get", (req, res) => {
       });
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
+    console.log(err);
+    return res.status(500).json({ error: 'Server error' });
   }
 });
 
