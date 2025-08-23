@@ -547,6 +547,12 @@ router.get('/saved-posts/:user_id', (req, res) => {
 //   }
 // });
 
+const vision = require('@google-cloud/vision');
+
+// สร้าง client ของ Google Vision โดยใช้ไฟล์ JSON path โดยตรง
+const visionClient = new vision.ImageAnnotatorClient({
+  keyFilename: 'D:/Project Appication/final_project_backend/heroic-purpose-464720-v1-e9f63d38f25c.json'
+});
 
 router.post('/post/add', async (req, res) => {
   try {
@@ -577,6 +583,24 @@ router.post('/post/add', async (req, res) => {
       await new Promise((resolve, reject) =>
         conn.query(sql, [values], (err) => err ? reject(err) : resolve())
       );
+
+      // วิเคราะห์ภาพและบันทึกผล
+      for (const imgUrl of images) {
+        try {
+          const [result] = await visionClient.labelDetection(imgUrl);
+          const labels = result.labelAnnotations.map(label => label.description).join(', ');
+
+          const analysisSql = `
+            INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text, created_at)
+            VALUES (?, ?, ?, NOW())
+          `;
+          await new Promise((resolve, reject) =>
+            conn.query(analysisSql, [insertedPostId, imgUrl, labels], (err) => err ? reject(err) : resolve())
+          );
+        } catch (err) {
+          console.error('Image analysis failed:', err);
+        }
+      }
     }
 
     // Insert categories
@@ -597,11 +621,10 @@ router.post('/post/add', async (req, res) => {
       );
     }
 
-    // 🔹 ดึงโพสต์ที่เพิ่งสร้าง + user + images + categories + hashtags
+    // ดึงโพสต์พร้อมข้อมูล user, images, categories, hashtags
     const postSql = `
-      SELECT 
-        post.*, user.uid, user.name, user.email, user.personal_description, user.profile_image,
-        user.height, user.weight, user.shirt_size, user.chest, user.waist_circumference, user.hip
+      SELECT post.*, user.uid, user.name, user.email, user.personal_description, user.profile_image,
+             user.height, user.weight, user.shirt_size, user.chest, user.waist_circumference, user.hip
       FROM post
       JOIN user ON post.post_fk_uid = user.uid
       WHERE post.post_id = ?
@@ -610,12 +633,10 @@ router.post('/post/add', async (req, res) => {
       conn.query(postSql, [insertedPostId], (err, results) => err ? reject(err) : resolve(results[0]))
     );
 
-    // ดึง image
     const imageResults = await new Promise((resolve, reject) =>
       conn.query(`SELECT * FROM image_post WHERE image_fk_postid = ?`, [insertedPostId], (err, results) => err ? reject(err) : resolve(results))
     );
 
-    // ดึง category
     const categoryResults = await new Promise((resolve, reject) =>
       conn.query(`
         SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
@@ -624,7 +645,6 @@ router.post('/post/add', async (req, res) => {
         WHERE pc.post_id_fk = ?`, [insertedPostId], (err, results) => err ? reject(err) : resolve(results))
     );
 
-    // ดึง hashtags
     const hashtagResults = await new Promise((resolve, reject) =>
       conn.query(`
         SELECT ph.post_id_fk, h.tag_id, h.tag_name 
@@ -633,21 +653,14 @@ router.post('/post/add', async (req, res) => {
         WHERE ph.post_id_fk = ?`, [insertedPostId], (err, results) => err ? reject(err) : resolve(results))
     );
 
-    const sizeMap = { XS: 1, S: 2, M: 3, L: 4, XL: 5, XXL: 6 };
+    // ดึงผลวิเคราะห์ภาพ
+    const analysisResults = await new Promise((resolve, reject) =>
+      conn.query(`SELECT * FROM post_image_analysis WHERE post_id_fk = ?`, [insertedPostId],
+        (err, results) => err ? reject(err) : resolve(results)
+      )
+    );
 
-    function calcDistance(u1, u2) {
-      const shirt1 = sizeMap[u1.shirt_size] || 0;
-      const shirt2 = sizeMap[u2.shirt_size] || 0;
-      return Math.sqrt(
-        Math.pow((u1.height || 0) - (u2.height || 0), 2) +
-        Math.pow((u1.weight || 0) - (u2.weight || 0), 2) +
-        Math.pow((u1.chest || 0) - (u2.chest || 0), 2) +
-        Math.pow((u1.waist_circumference || 0) - (u2.waist_circumference || 0), 2) +
-        Math.pow((u1.hip || 0) - (u2.hip || 0), 2) +
-        Math.pow(shirt1 - shirt2, 2)
-      );
-    }
-
+    // ปรับ responseData
     const responseData = {
       post: {
         post_id: postData.post_id,
@@ -677,10 +690,17 @@ router.post('/post/add', async (req, res) => {
       images: imageResults,
       categories: categoryResults.map(c => ({ cid: c.cid, cname: c.cname, cimage: c.cimage, ctype: c.ctype })),
       hashtags: hashtagResults.map(h => ({ tag_id: h.tag_id, tag_name: h.tag_name })),
-      similarity_distance: 0 // ของตัวเอง distance = 0
+      analysis: analysisResults.map(a => ({
+        image_url: a.image_url,
+        analysis_text: a.analysis_text
+      })),
+      similarity_distance: 0
     };
 
+
+
     res.status(201).json({ message: 'Post created', post: responseData });
+
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Internal server error' });
