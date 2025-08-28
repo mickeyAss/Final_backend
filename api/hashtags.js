@@ -193,109 +193,76 @@ router.get("/hashtags-with-posts", (req, res) => {
 
 
 // ค้นหาโพสต์ด้วย hashtag
-router.get("/search-hashtag", (req, res) => {
+router.get("/search-posts", (req, res) => {
   try {
     const q = req.query.q?.trim();
-    if (!q || q === "#") {
+    if (!q) {
       return res.status(400).json({ error: "กรุณาใส่คำค้นหา" });
     }
 
-    // 1. หา tag_id ของ hashtag
-    const hashtagSql = "SELECT * FROM hashtags WHERE tag_name = ?";
-    conn.query(hashtagSql, [q], (err, hashtagResults) => {
-      if (err) return res.status(400).json({ error: "Hashtag query error" });
+    // 1. ค้นหาโพสต์จาก post_topic และ post_description
+    const postSearchSql = `
+      SELECT 
+        post.*, 
+        user.uid, user.name, user.email
+      FROM post
+      JOIN user ON post.post_fk_uid = user.uid
+      WHERE post.post_topic LIKE ? OR post.post_description LIKE ?
+      ORDER BY post.post_date DESC
+    `;
 
-      let tagId = hashtagResults.length > 0 ? hashtagResults[0].tag_id : null;
+    const searchPattern = `%${q}%`;
 
-      // 2. หาโพสต์ที่เกี่ยวข้องกับ hashtag (ถ้ามี)
-      const postHashtagSql =
-        "SELECT post_id_fk FROM post_hashtags WHERE hashtag_id_fk = ?";
-      const postHashtagQuery = tagId
-        ? new Promise((resolve, reject) => {
-            conn.query(postHashtagSql, [tagId], (err, rows) => {
-              if (err) reject("Post-Hashtag query error");
-              else resolve(rows.map((ph) => ph.post_id_fk));
-            });
-          })
-        : Promise.resolve([]);
+    conn.query(postSearchSql, [searchPattern, searchPattern], (err, posts) => {
+      if (err) {
+        return res.status(400).json({ error: "Post query error" });
+      }
+      if (posts.length === 0) {
+        return res.status(404).json({ error: "ไม่พบโพสต์ที่ค้นหา" });
+      }
 
-      // 3. หาโพสต์จาก post_topic และ post_description
-      const postSearchSql = `
-        SELECT post_id 
-        FROM post
-        WHERE post_topic LIKE ? OR post_description LIKE ?
-      `;
-      const searchPattern = `%${q}%`;
-      const postSearchQuery = new Promise((resolve, reject) => {
-        conn.query(postSearchSql, [searchPattern, searchPattern], (err, rows) => {
-          if (err) reject("Post search query error");
-          else resolve(rows.map((p) => p.post_id));
+      const postIds = posts.map((p) => p.post_id);
+
+      // 2. ดึงรูปภาพที่เกี่ยวข้องกับโพสต์
+      const imageSql =
+        "SELECT * FROM image_post WHERE image_fk_postid IN (?)";
+      conn.query(imageSql, [postIds], (err, images) => {
+        if (err) {
+          return res.status(400).json({ error: "Image query error" });
+        }
+
+        const result = posts.map((p) => {
+          const postImages = images
+            .filter((img) => img.image_fk_postid === p.post_id)
+            .map((img) => img.image);
+
+          return {
+            post_id: p.post_id,
+            post_topic: p.post_topic,
+            post_description: p.post_description,
+            post_fk_uid: p.post_fk_uid,
+            post_date: p.post_date,
+            user: {
+              uid: p.uid,
+              name: p.name,
+              email: p.email,
+            },
+            images: postImages,
+          };
+        });
+
+        res.status(200).json({
+          total_posts: result.length,
+          posts: result,
         });
       });
-
-      // 4. รวมผลลัพธ์แล้ว query โพสต์จริง
-      Promise.all([postHashtagQuery, postSearchQuery])
-        .then(([hashtagPostIds, searchPostIds]) => {
-          const postIds = [...new Set([...hashtagPostIds, ...searchPostIds])];
-          if (postIds.length === 0) {
-            return res.status(404).json({ error: "ไม่พบโพสต์ที่ค้นหา" });
-          }
-
-          // ดึงโพสต์ทั้งหมดพร้อม user
-          const postSql = `
-            SELECT 
-              post.*, 
-              user.uid, user.name, user.email
-            FROM post
-            JOIN user ON post.post_fk_uid = user.uid
-            WHERE post.post_id IN (?)
-          `;
-          conn.query(postSql, [postIds], (err, posts) => {
-            if (err) return res.status(400).json({ error: "Post query error" });
-
-            // ดึงรูปภาพทั้งหมด
-            const imageSql =
-              "SELECT * FROM image_post WHERE image_fk_postid IN (?)";
-            conn.query(imageSql, [postIds], (err, images) => {
-              if (err)
-                return res.status(400).json({ error: "Image query error" });
-
-              const result = posts.map((p) => {
-                const postImages = images
-                  .filter((img) => img.image_fk_postid === p.post_id)
-                  .map((img) => img.image);
-
-                return {
-                  post_id: p.post_id,
-                  post_topic: p.post_topic,
-                  post_description: p.post_description,
-                  post_fk_uid: p.post_fk_uid,
-                  post_date: p.post_date,
-                  user: {
-                    uid: p.uid,
-                    name: p.name,
-                    email: p.email,
-                  },
-                  images: postImages,
-                };
-              });
-
-              res.status(200).json({
-                hashtag: hashtagResults[0] || null,
-                posts: result,
-              });
-            });
-          });
-        })
-        .catch((err) => {
-          res.status(400).json({ error: err });
-        });
     });
   } catch (err) {
     console.error("Server error:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
+
 router.get("/hashtag-posts", (req, res) => {
   try {
     const tagId = parseInt(req.query.tag_id);
