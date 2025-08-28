@@ -1559,6 +1559,47 @@ router.get('/comments/:post_id', (req, res) => {
   });
 });
 
+router.post("/report-posts", async (req, res) => {
+  try {
+    const { post_id, reporter_id, reason } = req.body;
+
+    if (!post_id || !reporter_id || !reason) {
+      return res.status(400).json({ message: "ข้อมูลไม่ครบ" });
+    }
+
+    const sql = `
+      INSERT INTO reports (post_id, reporter_id, reason)
+      VALUES (?, ?, ?)
+    `;
+    await conn.query(sql, [post_id, reporter_id, reason]);
+
+    return res.status(200).json({ message: "รายงานโพสต์สำเร็จ" });
+  } catch (error) {
+    console.error("Report Error:", error);
+    res.status(500).json({ message: "เกิดข้อผิดพลาด" });
+  }
+});
+
+// 📌 2) ดึงรายงานทั้งหมด (สำหรับ Admin)
+router.get("/get-post-repost", async (req, res) => {
+  try {
+    const sql = `
+      SELECT r.id, r.post_id, r.reporter_id, u.name as reporter_name, 
+             r.reason, r.created_at
+      FROM reports r
+      JOIN user u ON r.reporter_id = u.uid
+      ORDER BY r.created_at DESC
+    `;
+    const [rows] = await db.query(sql);
+
+    res.status(200).json(rows);
+  } catch (error) {
+    console.error("Fetch Reports Error:", error);
+    res.status(500).json({ message: "เกิดข้อผิดพลาด" });
+  }
+});
+
+
 
 
 
