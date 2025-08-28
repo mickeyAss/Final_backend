@@ -652,3 +652,55 @@ router.get("/search-user", (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 });
+
+
+// อัปเดตข้อมูลผู้ใช้ (name, personal_description, profile_image)
+router.put("/update-profile", (req, res) => {
+  const { uid, name, personal_description, profile_image } = req.body;
+
+  if (!uid) {
+    return res.status(400).json({ error: "User uid is required" });
+  }
+
+  // เตรียม field ที่ต้องการอัปเดต
+  const fields = [];
+  const values = [];
+
+  if (name !== undefined) {
+    fields.push("name = ?");
+    values.push(name);
+  }
+  if (personal_description !== undefined) {
+    fields.push("personal_description = ?");
+    values.push(personal_description);
+  }
+  if (profile_image !== undefined) {
+    fields.push("profile_image = ?");
+    values.push(profile_image);
+  }
+
+  if (fields.length === 0) {
+    return res.status(400).json({ error: "No fields to update" });
+  }
+
+  values.push(uid); // สำหรับ WHERE uid = ?
+
+  const sql = `
+    UPDATE user
+    SET ${fields.join(", ")}
+    WHERE uid = ?
+  `;
+
+  conn.query(sql, values, (err, result) => {
+    if (err) {
+      console.error("[Update Profile] DB error:", err);
+      return res.status(500).json({ error: "Database update error" });
+    }
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    return res.status(200).json({ message: "Profile updated successfully" });
+  });
+});
