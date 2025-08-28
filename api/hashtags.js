@@ -204,7 +204,7 @@ router.get("/search-posts", (req, res) => {
     const postSearchSql = `
       SELECT 
         post.*, 
-        user.uid, user.name, user.email
+        user.uid, user.name, user.email, user.profile_image
       FROM post
       JOIN user ON post.post_fk_uid = user.uid
       WHERE post.post_topic LIKE ? OR post.post_description LIKE ?
@@ -246,6 +246,7 @@ router.get("/search-posts", (req, res) => {
               uid: p.uid,
               name: p.name,
               email: p.email,
+              profile_image: p.profile_image || null, // ✅ เพิ่มตรงนี้
             },
             images: postImages,
           };
@@ -262,6 +263,7 @@ router.get("/search-posts", (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
+
 
 router.get("/hashtag-posts", (req, res) => {
   try {
