@@ -157,9 +157,6 @@ router.get("/get", (req, res) => {
   }
 });
 
-
-
-
 const admin = require('firebase-admin');
 // ต้องตั้งค่า Firebase Admin SDK ก่อน (โหลด service account json)
 const serviceAccount = require('../final-project-2f65c-firebase-adminsdk-fbsvc-b7cc350036.json');
@@ -1559,45 +1556,146 @@ router.get('/comments/:post_id', (req, res) => {
   });
 });
 
-router.post("/report-posts", async (req, res) => {
-  try {
-    const { post_id, reporter_id, reason } = req.body;
-
-    if (!post_id || !reporter_id || !reason) {
-      return res.status(400).json({ message: "ข้อมูลไม่ครบ" });
-    }
-
-    const sql = `
-      INSERT INTO reports (post_id, reporter_id, reason)
-      VALUES (?, ?, ?)
-    `;
-    await conn.query(sql, [post_id, reporter_id, reason]);
-
-    return res.status(200).json({ message: "รายงานโพสต์สำเร็จ" });
-  } catch (error) {
-    console.error("Report Error:", error);
-    res.status(500).json({ message: "เกิดข้อผิดพลาด" });
-  }
-});
-
-// 📌 2) ดึงรายงานทั้งหมด (สำหรับ Admin)
 router.get("/get-post-repost", async (req, res) => {
   try {
-    const sql = `
+    // ดึงรายการรายงาน
+    const reportSql = `
       SELECT r.id, r.post_id, r.reporter_id, u.name as reporter_name, 
              r.reason, r.created_at
       FROM reports r
       JOIN user u ON r.reporter_id = u.uid
       ORDER BY r.created_at DESC
     `;
-    const [rows] = await db.query(sql);
+    const [reports] = await conn.query(reportSql);
+    if (reports.length === 0) {
+      return res.status(200).json([]);
+    }
 
-    res.status(200).json(rows);
+    // ดึงข้อมูลที่เกี่ยวข้อง
+    const [postResults] = await conn.query(`
+      SELECT 
+        post.*, 
+        user.uid, user.name, user.email, 
+        user.personal_description, user.profile_image,
+        user.height, user.weight, user.shirt_size, 
+        user.chest, user.waist_circumference, user.hip
+      FROM post
+      JOIN user ON post.post_fk_uid = user.uid
+    `);
+
+    const [imageResults] = await conn.query(`SELECT * FROM image_post`);
+
+    const [categoryResults] = await db.query(`
+      SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
+      FROM post_category pc
+      JOIN category c ON pc.category_id_fk = c.cid
+    `);
+
+    const [hashtagResults] = await conn.query(`
+      SELECT ph.post_id_fk, h.tag_id, h.tag_name 
+      FROM post_hashtags ph
+      JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
+    `);
+
+    const [likeResults] = await conn.query(`
+      SELECT post_id_fk AS post_id, COUNT(*) AS like_count 
+      FROM post_likes 
+      GROUP BY post_id_fk
+    `);
+
+    const likeMap = {};
+    likeResults.forEach(item => {
+      likeMap[item.post_id] = item.like_count;
+    });
+
+    // รวมข้อมูล
+    const result = reports.map(report => {
+      const post = postResults.find(p => p.post_id === report.post_id);
+      if (!post) return null;
+
+      const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
+      const categories = categoryResults
+        .filter(cat => cat.post_id_fk === post.post_id)
+        .map(cat => ({
+          cid: cat.cid,
+          cname: cat.cname,
+          cimage: cat.cimage,
+          ctype: cat.ctype
+        }));
+
+      const hashtags = hashtagResults
+        .filter(ht => ht.post_id_fk === post.post_id)
+        .map(ht => ({
+          tag_id: ht.tag_id,
+          tag_name: ht.tag_name
+        }));
+
+      return {
+        report: {
+          id: report.id,
+          reason: report.reason,
+          created_at: report.created_at,
+          reporter_id: report.reporter_id,
+          reporter_name: report.reporter_name
+        },
+        post: {
+          post_id: post.post_id,
+          post_topic: post.post_topic,
+          post_description: post.post_description,
+          post_date: post.post_date,
+          post_fk_cid: post.post_fk_cid,
+          post_fk_uid: post.post_fk_uid,
+          post_status: post.post_status,
+          amount_of_like: likeMap[post.post_id] || 0,
+          amount_of_save: post.amount_of_save || 0,
+          amount_of_comment: post.amount_of_comment || 0,
+        },
+        user: {
+          uid: post.uid,
+          name: post.name,
+          email: post.email,
+          personal_description: post.personal_description,
+          profile_image: post.profile_image,
+          height: post.height,
+          weight: post.weight,
+          shirt_size: post.shirt_size,
+          chest: post.chest,
+          waist_circumference: post.waist_circumference,
+          hip: post.hip
+        },
+        images,
+        categories,
+        hashtags
+      };
+    }).filter(item => item !== null);
+
+    res.status(200).json(result);
+
   } catch (error) {
     console.error("Fetch Reports Error:", error);
     res.status(500).json({ message: "เกิดข้อผิดพลาด" });
   }
 });
+
+
+// 2) ดึงรายงานทั้งหมด (สำหรับ Admin)
+// router.get("/get-post-repost", async (req, res) => {
+//   try {
+//     const sql = `
+//       SELECT r.id, r.post_id, r.reporter_id, u.name as reporter_name, 
+//              r.reason, r.created_at
+//       FROM reports r
+//       JOIN user u ON r.reporter_id = u.uid
+//       ORDER BY r.created_at DESC
+//     `;
+//     const [rows] = await db.query(sql);
+
+//     res.status(200).json(rows);
+//   } catch (error) {
+//     console.error("Fetch Reports Error:", error);
+//     res.status(500).json({ message: "เกิดข้อผิดพลาด" });
+//   }
+// });
 
 
 
