@@ -2,6 +2,7 @@ var express = require('express');
 var router = express.Router();
 var conn = require('../dbconnect')
 
+
 module.exports = router;
 
 // --------------------------------------------
@@ -155,6 +156,9 @@ router.get("/get", (req, res) => {
     return res.status(500).json({ error: 'Server error' });
   }
 });
+
+
+
 
 const admin = require('firebase-admin');
 // ต้องตั้งค่า Firebase Admin SDK ก่อน (โหลด service account json)
@@ -1554,171 +1558,63 @@ router.get('/comments/:post_id', (req, res) => {
     res.status(200).json({ comments: results });
   });
 });
-router.get("/get-post-repost", async (req, res) => {
+
+router.post("/report-posts", async (req, res) => {
   try {
-    // 📌 ดึงรายการรายงาน
-    const reportSql = `
-      SELECT r.id, r.post_id, r.reporter_id, u.name as reporter_name, 
-             r.reason, r.created_at
-      FROM reports r
-      JOIN user u ON r.reporter_id = u.uid
-      ORDER BY r.created_at DESC
+    const { post_id, reporter_id, reason } = req.body;
+
+    if (!post_id || !reporter_id || !reason) {
+      return res.status(400).json({ message: "ข้อมูลไม่ครบ" });
+    }
+
+    const sql = `
+      INSERT INTO reports (post_id, reporter_id, reason)
+      VALUES (?, ?, ?)
     `;
+    await conn.query(sql, [post_id, reporter_id, reason]);
 
-    let reports = await conn.query(reportSql);
-
-    // ถ้าเป็น mysql2/promise → จะ return [rows, fields]
-    if (Array.isArray(reports) && Array.isArray(reports[0])) {
-      reports = reports[0]; // ✅ rows จริง
-    }
-
-    if (!reports || reports.length === 0) {
-      return res.status(200).json([]);
-    }
-
-    // 📌 ดึง post_id ทั้งหมด
-    const postIds = reports.map(r => r.post_id);
-
-    // 📌 ดึงข้อมูลโพสต์
-    let postResults = await conn.query(
-      `
-      SELECT 
-        p.*, 
-        u.uid, u.name, u.email, 
-        u.personal_description, u.profile_image,
-        u.height, u.weight, u.shirt_size, 
-        u.chest, u.waist_circumference, u.hip
-      FROM post p
-      JOIN user u ON p.post_fk_uid = u.uid
-      WHERE p.post_id IN (?)
-      `,
-      [postIds]
-    );
-    if (Array.isArray(postResults) && Array.isArray(postResults[0])) {
-      postResults = postResults[0];
-    }
-
-    // 📌 ดึงรูปภาพ
-    let imageResults = await conn.query(
-      `SELECT * FROM image_post WHERE image_fk_postid IN (?)`,
-      [postIds]
-    );
-    if (Array.isArray(imageResults) && Array.isArray(imageResults[0])) {
-      imageResults = imageResults[0];
-    }
-
-    // 📌 ดึงหมวดหมู่
-    let categoryResults = await conn.query(
-      `
-      SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
-      FROM post_category pc
-      JOIN category c ON pc.category_id_fk = c.cid
-      WHERE pc.post_id_fk IN (?)
-      `,
-      [postIds]
-    );
-    if (Array.isArray(categoryResults) && Array.isArray(categoryResults[0])) {
-      categoryResults = categoryResults[0];
-    }
-
-    // 📌 ดึง hashtags
-    let hashtagResults = await conn.query(
-      `
-      SELECT ph.post_id_fk, h.tag_id, h.tag_name 
-      FROM post_hashtags ph
-      JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
-      WHERE ph.post_id_fk IN (?)
-      `,
-      [postIds]
-    );
-    if (Array.isArray(hashtagResults) && Array.isArray(hashtagResults[0])) {
-      hashtagResults = hashtagResults[0];
-    }
-
-    // 📌 ดึง likes
-    let likeResults = await conn.query(
-      `
-      SELECT post_id_fk AS post_id, COUNT(*) AS like_count 
-      FROM post_likes 
-      WHERE post_id_fk IN (?)
-      GROUP BY post_id_fk
-      `,
-      [postIds]
-    );
-    if (Array.isArray(likeResults) && Array.isArray(likeResults[0])) {
-      likeResults = likeResults[0];
-    }
-
-    // 📌 สร้าง map สำหรับ likes
-    const likeMap = {};
-    likeResults.forEach(item => {
-      likeMap[item.post_id] = item.like_count;
-    });
-
-    // 📌 รวมข้อมูลทั้งหมด
-    const result = reports.map(report => {
-      const post = postResults.find(p => p.post_id === report.post_id);
-      if (!post) return null;
-
-      return {
-        report: {
-          id: report.id,
-          reason: report.reason,
-          created_at: report.created_at,
-          reporter_id: report.reporter_id,
-          reporter_name: report.reporter_name
-        },
-        post: {
-          post_id: post.post_id,
-          post_topic: post.post_topic,
-          post_description: post.post_description,
-          post_date: post.post_date,
-          post_fk_cid: post.post_fk_cid,
-          post_fk_uid: post.post_fk_uid,
-          post_status: post.post_status,
-          amount_of_like: likeMap[post.post_id] || 0,
-          amount_of_save: post.amount_of_save || 0,
-          amount_of_comment: post.amount_of_comment || 0
-        },
-        user: {
-          uid: post.uid,
-          name: post.name,
-          email: post.email,
-          personal_description: post.personal_description,
-          profile_image: post.profile_image,
-          height: post.height,
-          weight: post.weight,
-          shirt_size: post.shirt_size,
-          chest: post.chest,
-          waist_circumference: post.waist_circumference,
-          hip: post.hip
-        },
-        images: imageResults.filter(img => img.image_fk_postid === post.post_id),
-        categories: categoryResults
-          .filter(cat => cat.post_id_fk === post.post_id)
-          .map(cat => ({
-            cid: cat.cid,
-            cname: cat.cname,
-            cimage: cat.cimage,
-            ctype: cat.ctype
-          })),
-        hashtags: hashtagResults
-          .filter(ht => ht.post_id_fk === post.post_id)
-          .map(ht => ({
-            tag_id: ht.tag_id,
-            tag_name: ht.tag_name
-          }))
-      };
-    }).filter(item => item !== null);
-
-    res.status(200).json(result);
-
+    return res.status(200).json({ message: "รายงานโพสต์สำเร็จ" });
   } catch (error) {
-    console.error("❌ Fetch Reports Error:", error);
-    res.status(500).json({ message: "เกิดข้อผิดพลาด", error: error.message });
+    console.error("Report Error:", error);
+    res.status(500).json({ message: "เกิดข้อผิดพลาด" });
   }
 });
 
+// 📌 2) ดึงรายงานทั้งหมด (สำหรับ Admin)
+router.get("/get-post-repost", (req, res) => {
+  const sql = `
+    SELECT 
+      r.id AS report_id,
+      r.post_id,
+      r.reporter_id,
+      reporter.name AS reporter_name,
+      r.reason,
+      r.created_at AS report_created_at,
+      p.post_topic,
+      p.post_description,
+      p.post_date,
+      p.post_fk_uid,
+      p.post_status,
+      post_user.uid AS post_owner_uid,
+      post_user.name AS post_owner_name,
+      post_user.email AS post_owner_email,
+      post_user.personal_description AS post_owner_personal_description,
+      post_user.profile_image AS post_owner_profile_image
+    FROM reports r
+    JOIN user AS reporter ON r.reporter_id = reporter.uid
+    JOIN post p ON r.post_id = p.post_id
+    JOIN user AS post_user ON p.post_fk_uid = post_user.uid
+    ORDER BY r.created_at DESC
+  `;
+
+  conn.query(sql, (err, rows) => {
+    if (err) {
+      console.error("Fetch Reports Error:", err);
+      return res.status(500).json({ message: "เกิดข้อผิดพลาด" });
+    }
+    res.status(200).json(rows);
+  });
+});
 
 
 
