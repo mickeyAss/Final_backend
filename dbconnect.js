@@ -1,27 +1,25 @@
-const mysql = require('mysql');
+const mysql = require('mysql2/promise');
 
-// ใช้ createPool แทน createConnection เพื่อให้จัดการ connection อัตโนมัติ
-const conn = mysql.createPool({
-    connectionLimit: 10, // จำกัดจำนวน connection สูงสุด
+// ใช้ createPool พร้อม promise
+const pool = mysql.createPool({
     host: 'mysqladmin.comsciproject.net',
     user: 'u528477660_micearn',
     password: 'Ysp1o@TQ',
-    database: 'u528477660_micearn'
+    database: 'u528477660_micearn',
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
 });
 
-// ทดสอบการเชื่อมต่อ
-conn.getConnection((err, connection) => {
-    if (err) {
+// ทดสอบ connection
+(async () => {
+    try {
+        const conn = await pool.getConnection();
+        console.log('MySQL successfully connected!');
+        conn.release();
+    } catch (err) {
         console.error('Error connecting to MySQL database:', err);
-        return;
     }
-    console.log('MySQL successfully connected!');
-    connection.release(); // ปล่อย connection กลับ pool
-});
+})();
 
-// จับ error ที่เกิดจาก connection pool
-conn.on('error', (err) => {
-    console.error('🔥 MySQL pool error:', err);
-});
-
-module.exports = conn;
+module.exports = pool;
