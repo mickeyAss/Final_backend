@@ -1593,7 +1593,15 @@ router.get("/admin/reports", (req, res) => {
       post_user.name AS post_owner_name,
       post_user.profile_image AS post_owner_profile_image,
       COUNT(r.id) AS report_count,
-      JSON_ARRAYAGG(ip.image) AS post_images
+      JSON_ARRAYAGG(ip.image) AS post_images,
+      JSON_ARRAYAGG(
+        JSON_OBJECT(
+          'report_id', r.id,
+          'reporter_id', r.reporter_id,
+          'reason', r.reason,
+          'created_at', r.created_at
+        )
+      ) AS reports
     FROM reports r
     JOIN post p ON r.post_id = p.post_id
     JOIN user AS post_user ON p.post_fk_uid = post_user.uid
@@ -1610,6 +1618,7 @@ router.get("/admin/reports", (req, res) => {
     res.status(200).json(rows);
   });
 });
+
 
 
 
