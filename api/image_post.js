@@ -1581,40 +1581,33 @@ router.post("/report-posts", async (req, res) => {
 });
 
 // 📌 2) ดึงรายงานทั้งหมด (สำหรับ Admin)
-router.get("/get-post-repost", (req, res) => {
+// 📌 Admin ดูรายงานโพสต์ + จำนวนคนที่รายงาน
+router.get("/admin/reports", (req, res) => {
   const sql = `
     SELECT 
-      r.id AS report_id,
-      r.post_id,
-      r.reporter_id,
-      reporter.name AS reporter_name,
-      r.reason,
-      r.created_at AS report_created_at,
+      p.post_id,
       p.post_topic,
       p.post_description,
       p.post_date,
-      p.post_fk_uid,
       p.post_status,
-      post_user.uid AS post_owner_uid,
       post_user.name AS post_owner_name,
-      post_user.email AS post_owner_email,
-      post_user.personal_description AS post_owner_personal_description,
-      post_user.profile_image AS post_owner_profile_image
+      COUNT(r.id) AS report_count
     FROM reports r
-    JOIN user AS reporter ON r.reporter_id = reporter.uid
     JOIN post p ON r.post_id = p.post_id
     JOIN user AS post_user ON p.post_fk_uid = post_user.uid
-    ORDER BY r.created_at DESC
+    GROUP BY p.post_id
+    ORDER BY report_count DESC
   `;
 
   conn.query(sql, (err, rows) => {
     if (err) {
-      console.error("Fetch Reports Error:", err);
+      console.error("Fetch Admin Reports Error:", err);
       return res.status(500).json({ message: "เกิดข้อผิดพลาด" });
     }
     res.status(200).json(rows);
   });
 });
+
 
 
 
