@@ -1609,6 +1609,19 @@ router.get("/admin/reports", (req, res) => {
 });
 
 
+router.delete("/delete-post/:post_id", (req, res) => {
+  const { post_id } = req.params;
+  const sql = `DELETE FROM post WHERE post_id = ?`;
+  conn.query(sql, [post_id], (err, result) => {
+    if (err) {
+      console.error("Delete Post Error:", err);
+      return res.status(500).json({ message: "เกิดข้อผิดพลาด" });
+    }
+    res.status(200).json({ message: "ลบโพสต์สำเร็จ" });
+  });
+});
+
+
 
 
 
