@@ -1598,6 +1598,7 @@ router.get("/admin/reports", (req, res) => {
         JSON_OBJECT(
           'report_id', r.id,
           'reporter_id', r.reporter_id,
+          'reporter_name', reporter.name,
           'reason', r.reason,
           'created_at', r.created_at
         )
@@ -1605,6 +1606,7 @@ router.get("/admin/reports", (req, res) => {
     FROM reports r
     JOIN post p ON r.post_id = p.post_id
     JOIN user AS post_user ON p.post_fk_uid = post_user.uid
+    JOIN user AS reporter ON r.reporter_id = reporter.uid
     LEFT JOIN image_post ip ON p.post_id = ip.image_fk_postid
     GROUP BY p.post_id
     ORDER BY report_count DESC
@@ -1615,9 +1617,29 @@ router.get("/admin/reports", (req, res) => {
       console.error("Fetch Admin Reports Error:", err);
       return res.status(500).json({ message: "เกิดข้อผิดพลาด" });
     }
-    res.status(200).json(rows);
+
+    // แปลงข้อมูล JSON string เป็น object ในแต่ละ row
+    const posts = rows.map(row => ({
+      postId: row.post_id,
+      topic: row.post_topic,
+      description: row.post_description,
+      date: row.post_date,
+      status: row.post_status,
+      owner: {
+        name: row.post_owner_name,
+        profileImage: row.post_owner_profile_image,
+      },
+      reportCount: row.report_count,
+      images: row.post_images ? JSON.parse(row.post_images) : [],
+      reports: row.reports ? JSON.parse(row.reports) : [],
+    }));
+
+    // ส่งผลลัพธ์
+    res.status(200).json(posts);
   });
 });
+
+
 
 
 
