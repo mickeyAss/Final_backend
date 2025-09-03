@@ -1591,10 +1591,13 @@ router.get("/admin/reports", (req, res) => {
       p.post_date,
       p.post_status,
       post_user.name AS post_owner_name,
-      COUNT(r.id) AS report_count
+      post_user.profile_image AS post_owner_profile_image,
+      COUNT(r.id) AS report_count,
+      JSON_ARRAYAGG(ip.image) AS post_images
     FROM reports r
     JOIN post p ON r.post_id = p.post_id
     JOIN user AS post_user ON p.post_fk_uid = post_user.uid
+    LEFT JOIN image_post ip ON p.post_id = ip.image_fk_postid
     GROUP BY p.post_id
     ORDER BY report_count DESC
   `;
@@ -1607,6 +1610,7 @@ router.get("/admin/reports", (req, res) => {
     res.status(200).json(rows);
   });
 });
+
 
 
 router.delete("/delete-post/:post_id", (req, res) => {
