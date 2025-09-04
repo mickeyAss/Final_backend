@@ -1519,101 +1519,62 @@ router.post("/report-posts", (req, res) => {
 
 // 📌 2) ดึงรายงานทั้งหมด (สำหรับ Admin)
 // 📌 Admin ดูรายงานโพสต์ + จำนวนคนที่รายงาน
-router.get("/admin/reports", (req, res) => { 
-  const sql = ` 
-    SELECT  
-      p.post_id, 
-      p.post_topic, 
-      p.post_description, 
-      p.post_date, 
-      p.post_status, 
-      post_user.name AS post_owner_name, 
-      post_user.profile_image AS post_owner_profile_image, 
-      COUNT(DISTINCT r.id) + COUNT(DISTINCT ur.id) AS total_report_count,
-      COUNT(DISTINCT r.id) AS post_report_count,
-      COUNT(DISTINCT ur.id) AS user_report_count,
-      JSON_ARRAYAGG(DISTINCT ip.image) AS post_images, 
-      JSON_ARRAYAGG(DISTINCT 
-        CASE WHEN r.id IS NOT NULL THEN
-          JSON_OBJECT( 
-            'report_type', 'post',
-            'report_id', r.id, 
-            'reporter_id', r.reporter_id, 
-            'reporter_name', post_reporter.name, 
-            'reason', r.reason, 
-            'created_at', r.created_at 
-          ) 
-        END
-      ) AS post_reports,
-      JSON_ARRAYAGG(DISTINCT 
-        CASE WHEN ur.id IS NOT NULL THEN
-          JSON_OBJECT( 
-            'report_type', 'user',
-            'report_id', ur.id, 
-            'reporter_id', ur.reporter_id, 
-            'reporter_name', user_reporter.name, 
-            'reported_user_id', ur.reported_user_id,
-            'reported_user_name', reported_user.name,
-            'reason', ur.reason, 
-            'created_at', ur.created_at 
-          ) 
-        END
-      ) AS user_reports
-    FROM post p
-    JOIN user AS post_user ON p.post_fk_uid = post_user.uid 
-    LEFT JOIN reports r ON r.post_id = p.post_id 
-    LEFT JOIN user AS post_reporter ON r.reporter_id = post_reporter.uid 
-    LEFT JOIN user_report ur ON ur.reported_user_id = p.post_fk_uid
-    LEFT JOIN user AS user_reporter ON ur.reporter_id = user_reporter.uid 
-    LEFT JOIN user AS reported_user ON ur.reported_user_id = reported_user.uid
-    LEFT JOIN image_post ip ON p.post_id = ip.image_fk_postid 
-    WHERE r.id IS NOT NULL OR ur.id IS NOT NULL
-    GROUP BY p.post_id 
-    ORDER BY total_report_count DESC 
-  `; 
- 
-  conn.query(sql, (err, rows) => { 
-    if (err) { 
-      console.error("Fetch Admin Reports Error:", err); 
-      return res.status(500).json({ message: "เกิดข้อผิดพลาด" }); 
-    } 
- 
-    // แปลงข้อมูล JSON string เป็น object ในแต่ละ row 
-    const posts = rows.map(row => {
-      // ลบ null values และ empty objects ออกจาก arrays
-      const postReports = row.post_reports ? 
-        JSON.parse(row.post_reports).filter(report => report !== null) : [];
-      const userReports = row.user_reports ? 
-        JSON.parse(row.user_reports).filter(report => report !== null) : [];
-      const images = row.post_images ? 
-        JSON.parse(row.post_images).filter(img => img !== null) : [];
+  router.get("/admin/reports", (req, res) => {
+    const sql = `
+      SELECT 
+        p.post_id,
+        p.post_topic,
+        p.post_description,
+        p.post_date,
+        p.post_status,
+        post_user.name AS post_owner_name,
+        post_user.profile_image AS post_owner_profile_image,
+        COUNT(r.id) AS report_count,
+        JSON_ARRAYAGG(ip.image) AS post_images,
+        JSON_ARRAYAGG(
+          JSON_OBJECT(
+            'report_id', r.id,
+            'reporter_id', r.reporter_id,
+            'reporter_name', reporter.name,
+            'reason', r.reason,
+            'created_at', r.created_at
+          )
+        ) AS reports
+      FROM reports r
+      JOIN post p ON r.post_id = p.post_id
+      JOIN user AS post_user ON p.post_fk_uid = post_user.uid
+      JOIN user AS reporter ON r.reporter_id = reporter.uid
+      LEFT JOIN image_post ip ON p.post_id = ip.image_fk_postid
+      GROUP BY p.post_id
+      ORDER BY report_count DESC
+    `;
 
-      return {
-        postId: row.post_id, 
-        topic: row.post_topic, 
-        description: row.post_description, 
-        date: row.post_date, 
-        status: row.post_status, 
-        owner: { 
-          name: row.post_owner_name, 
-          profileImage: row.post_owner_profile_image, 
-        }, 
-        totalReportCount: row.total_report_count,
-        postReportCount: row.post_report_count,
-        userReportCount: row.user_report_count,
-        images: images, 
-        postReports: postReports,
-        userReports: userReports,
-        allReports: [...postReports, ...userReports].sort((a, b) => 
-          new Date(b.created_at) - new Date(a.created_at)
-        )
-      };
-    }); 
- 
-    // ส่งผลลัพธ์ 
-    res.status(200).json(posts); 
-  }); 
-});
+    conn.query(sql, (err, rows) => {
+      if (err) {
+        console.error("Fetch Admin Reports Error:", err);
+        return res.status(500).json({ message: "เกิดข้อผิดพลาด" });
+      }
+
+      // แปลงข้อมูล JSON string เป็น object ในแต่ละ row
+      const posts = rows.map(row => ({
+        postId: row.post_id,
+        topic: row.post_topic,
+        description: row.post_description,
+        date: row.post_date,
+        status: row.post_status,
+        owner: {
+          name: row.post_owner_name,
+          profileImage: row.post_owner_profile_image,
+        },
+        reportCount: row.report_count,
+        images: row.post_images ? JSON.parse(row.post_images) : [],
+        reports: row.reports ? JSON.parse(row.reports) : [],
+      }));
+
+      // ส่งผลลัพธ์
+      res.status(200).json(posts);
+    });
+  });
 
 
 router.delete("/delete-post/:post_id", async (req, res) => {
