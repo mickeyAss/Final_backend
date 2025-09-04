@@ -424,125 +424,6 @@ router.get('/saved-posts/:user_id', (req, res) => {
   });
 });
 
-// --------------------------------------------
-// API POST /post/add
-// เพิ่มโพสต์พร้อมรูปภาพ, หมวดหมู่ และแฮชแท็ก
-// --------------------------------------------
-
-// router.use(express.json({ limit: '50mb' })); // รองรับ Base64 ขนาดใหญ่
-// const axios = require('axios');
-// const sharp = require('sharp');
-// require('dotenv').config();  // ต้องอยู่บนสุด
-// const vision = require('@google-cloud/vision');
-// const { Translate } = require('@google-cloud/translate').v2;
-
-// // Google credentials from JSON env
-// const visionCreds = JSON.parse(process.env.GOOGLE_VISION_CREDENTIALS_JSON);
-// const translateCreds = JSON.parse(process.env.GOOGLE_TRANSLATE_CREDENTIALS_JSON);
-
-// const visionClient = new vision.ImageAnnotatorClient({ credentials: visionCreds });
-// const translateClient = new Translate({ credentials: translateCreds, projectId: translateCreds.project_id });
-
-// // POST /post/add
-// router.post('/post/add', async (req, res) => {
-//   try {
-//     let { post_topic, post_description, post_fk_uid, images, category_id_fk, hashtags, post_status } = req.body;
-//     post_topic = post_topic?.trim() || null;
-//     post_description = post_description?.trim() || null;
-//     post_status = (post_status?.toLowerCase() === 'friends') ? 'friends' : 'public';
-
-//     if (!post_fk_uid || !Array.isArray(images) || images.length === 0) {
-//       return res.status(400).json({ error: 'Missing required fields' });
-//     }
-
-//     // Insert post
-//     const postResult = await new Promise((resolve, reject) => {
-//       const sql = `INSERT INTO post (post_topic, post_description, post_date, post_fk_uid, post_status) VALUES (?, ?, NOW(), ?, ?)`;
-//       conn.query(sql, [post_topic, post_description, post_fk_uid, post_status], (err, result) => err ? reject(err) : resolve(result));
-//     });
-
-//     const insertedPostId = postResult.insertId;
-
-//     // วิเคราะห์ภาพ
-//     const visionResults = [];
-//     for (const img of images) {
-//       try {
-//         // ตรวจสอบว่าฐานข้อมูลเป็น URL หรือ Base64
-//         const isBase64 = !img.startsWith('http');
-//         const request = isBase64
-//           ? { image: { content: img } }
-//           : { image: { source: { imageUri: img } } };
-
-//         const [visionResult] = await visionClient.labelDetection(request);
-
-//         const labels = [];
-//         if (visionResult.labelAnnotations) {
-//           for (const label of visionResult.labelAnnotations) {
-//             const description = label.description;
-//             const [translation] = await translateClient.translate(description, 'th');
-//             labels.push({ en: description, th: translation });
-//           }
-//         } else {
-//           console.log('⚠️ Vision AI returned empty labels for this image');
-//         }
-
-//         visionResults.push({ image: img, labels });
-//       } catch (err) {
-//         console.error('Error analyzing image', err);
-//         visionResults.push({ image: img, labels: [], error: err.message });
-//       }
-//     }
-
-//     // Insert image_post
-//     if (images.length > 0) {
-//       const sql = `INSERT INTO image_post (image, image_fk_postid) VALUES ?`;
-//       const values = images.map(img => [img, insertedPostId]);
-//       await new Promise((resolve, reject) => conn.query(sql, [values], (err) => err ? reject(err) : resolve()));
-//     }
-
-//     // Insert post_image_analysis
-//     if (visionResults.length > 0) {
-//       const sql = `INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text, created_at) VALUES ?`;
-//       const values = visionResults.map(vr => [insertedPostId, vr.image, JSON.stringify(vr.labels), new Date()]);
-//       await new Promise((resolve, reject) => conn.query(sql, [values], (err) => err ? reject(err) : resolve()));
-//     }
-
-//     // Insert categories
-//     if (Array.isArray(category_id_fk) && category_id_fk.length > 0) {
-//       const sql = `INSERT INTO post_category (category_id_fk, post_id_fk) VALUES ?`;
-//       const values = category_id_fk.map(cid => [cid, insertedPostId]);
-//       await new Promise((resolve, reject) => conn.query(sql, [values], (err) => err ? reject(err) : resolve()));
-//     }
-
-//     // Insert hashtags
-//     if (Array.isArray(hashtags) && hashtags.length > 0) {
-//       const sql = `INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?`;
-//       const values = hashtags.map(tagId => [insertedPostId, tagId]);
-//       await new Promise((resolve, reject) => conn.query(sql, [values], (err) => err ? reject(err) : resolve()));
-//     }
-
-//     res.status(201).json({ message: 'Post created', post_id: insertedPostId, visionResults });
-//   } catch (error) {
-//     console.error(error);
-//     res.status(500).json({ error: 'Internal server error' });
-//   }
-// });
-
-const path = require('path');
-const vision = require('@google-cloud/vision');
-
-// เลือก key path สำหรับ dev หรือ production
-let visionClient;
-if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-  // ใช้ Environment Variable บน server/Render
-  visionClient = new vision.ImageAnnotatorClient();
-} else {
-  // สำหรับ dev Windows/macOS
-  const keyFilePath = path.join(__dirname, '..', 'config', 'heroic-purpose-464720-v1-e9f63d38f25c.json');
-  visionClient = new vision.ImageAnnotatorClient({
-    keyFilename: keyFilePath
-  });
-}
 
 router.post('/post/add', async (req, res) => {
   try {
@@ -1559,81 +1440,81 @@ router.get('/comments/:post_id', (req, res) => {
   });
 });
 
-router.post("/report-posts", (req, res) => {
-  const { post_id, reporter_id, reason } = req.body;
+  router.post("/report-posts", (req, res) => {
+    const { post_id, reporter_id, reason } = req.body;
 
-  if (!post_id || !reporter_id || !reason) {
-    return res.status(400).json({ message: "ข้อมูลไม่ครบ" });
-  }
-
-  // ตรวจสอบว่า user นี้รายงานโพสต์นี้ไปแล้วหรือยัง
-  const checkSql = `SELECT * FROM reports WHERE post_id = ? AND reporter_id = ?`;
-  conn.query(checkSql, [post_id, reporter_id], (err, existingReports) => {
-    if (err) {
-      console.error("Report Error:", err);
-      return res.status(500).json({ message: "เกิดข้อผิดพลาด" });
+    if (!post_id || !reporter_id || !reason) {
+      return res.status(400).json({ message: "ข้อมูลไม่ครบ" });
     }
 
-    if (existingReports.length > 0) {
-      return res.status(400).json({ message: "คุณได้รายงานโพสต์นี้ไปแล้ว" });
-    }
-
-    // Insert รายงานลง MySQL
-    const insertReportSql = `INSERT INTO reports (post_id, reporter_id, reason) VALUES (?, ?, ?)`;
-    conn.query(insertReportSql, [post_id, reporter_id, reason], (err2) => {
-      if (err2) {
-        console.error("Report Insert Error:", err2);
+    // ตรวจสอบว่า user นี้รายงานโพสต์นี้ไปแล้วหรือยัง
+    const checkSql = `SELECT * FROM reports WHERE post_id = ? AND reporter_id = ?`;
+    conn.query(checkSql, [post_id, reporter_id], (err, existingReports) => {
+      if (err) {
+        console.error("Report Error:", err);
         return res.status(500).json({ message: "เกิดข้อผิดพลาด" });
       }
 
-      // หาว่าเจ้าของโพสต์เป็นใคร
-      const ownerSql = `SELECT post_fk_uid FROM post WHERE post_id = ?`;
-      conn.query(ownerSql, [post_id], (err3, ownerResult) => {
-        if (err3) {
-          console.error("Owner Query Error:", err3);
+      if (existingReports.length > 0) {
+        return res.status(400).json({ message: "คุณได้รายงานโพสต์นี้ไปแล้ว" });
+      }
+
+      // Insert รายงานลง MySQL
+      const insertReportSql = `INSERT INTO reports (post_id, reporter_id, reason) VALUES (?, ?, ?)`;
+      conn.query(insertReportSql, [post_id, reporter_id, reason], (err2) => {
+        if (err2) {
+          console.error("Report Insert Error:", err2);
           return res.status(500).json({ message: "เกิดข้อผิดพลาด" });
         }
 
-        if (ownerResult.length > 0) {
-          const receiver_uid = ownerResult[0].post_fk_uid;
-
-          // ไม่ส่ง notification ถ้าเจ้าของโพสต์รายงานตัวเอง
-          if (receiver_uid !== reporter_id) {
-            const notifMessage = `มีผู้รายงานโพสต์ของคุณ: ${reason}`;
-
-            // Insert notification ลง MySQL
-            const notifSql = `
-              INSERT INTO notifications (sender_uid, receiver_uid, post_id, type, message)
-              VALUES (?, ?, ?, 'report', ?)
-            `;
-            conn.query(notifSql, [reporter_id, receiver_uid, post_id, notifMessage], (err4) => {
-              if (err4) console.log('[Report] Notification insert failed:', err4);
-            });
-
-            // เพิ่ม notification ลง Firebase
-            const notifData = {
-              sender_uid: reporter_id,
-              receiver_uid,
-              post_id,
-              type: 'report',
-              message: notifMessage,
-              reason,
-              is_read: false,
-              created_at: admin.database.ServerValue.TIMESTAMP
-            };
-
-            const db = admin.database();
-            db.ref('notifications').push().set(notifData)
-              .then(() => console.log('[Report] Notification added to Firebase'))
-              .catch((firebaseErr) => console.log('[Report] Firebase notification failed:', firebaseErr));
+        // หาว่าเจ้าของโพสต์เป็นใคร
+        const ownerSql = `SELECT post_fk_uid FROM post WHERE post_id = ?`;
+        conn.query(ownerSql, [post_id], (err3, ownerResult) => {
+          if (err3) {
+            console.error("Owner Query Error:", err3);
+            return res.status(500).json({ message: "เกิดข้อผิดพลาด" });
           }
-        }
 
-        res.status(200).json({ message: "รายงานโพสต์สำเร็จ" });
+          if (ownerResult.length > 0) {
+            const receiver_uid = ownerResult[0].post_fk_uid;
+
+            // ไม่ส่ง notification ถ้าเจ้าของโพสต์รายงานตัวเอง
+            if (receiver_uid !== reporter_id) {
+              const notifMessage = `${reason}`;
+
+              // Insert notification ลง MySQL
+              const notifSql = `
+                INSERT INTO notifications (sender_uid, receiver_uid, post_id, type, message)
+                VALUES (?, ?, ?, 'report', ?)
+              `;
+              conn.query(notifSql, [reporter_id, receiver_uid, post_id, notifMessage], (err4) => {
+                if (err4) console.log('[Report] Notification insert failed:', err4);
+              });
+
+              // เพิ่ม notification ลง Firebase
+              const notifData = {
+                sender_uid: reporter_id,
+                receiver_uid,
+                post_id,
+                type: 'report',
+                message: notifMessage,
+                reason,
+                is_read: false,
+                created_at: admin.database.ServerValue.TIMESTAMP
+              };
+
+              const db = admin.database();
+              db.ref('notifications').push().set(notifData)
+                .then(() => console.log('[Report] Notification added to Firebase'))
+                .catch((firebaseErr) => console.log('[Report] Firebase notification failed:', firebaseErr));
+            }
+          }
+
+          res.status(200).json({ message: "รายงานโพสต์สำเร็จ" });
+        });
       });
     });
   });
-});
 
 
 // 📌 2) ดึงรายงานทั้งหมด (สำหรับ Admin)
@@ -1766,7 +1647,7 @@ router.post("/report-user", (req, res) => {
 
       // ไม่ส่ง notification ถ้าผู้ใช้รายงานตัวเอง
       if (reported_id !== reporter_id) {
-        const notifMessage = `มีผู้รายงานคุณ: ${reason}`;
+        const notifMessage = `${reason}`;
 
         // Insert notification ลง MySQL
         const notifSql = `
@@ -1797,7 +1678,70 @@ router.post("/report-user", (req, res) => {
       res.status(200).json({ message: "รายงานผู้ใช้สำเร็จ" });
     });
   });
+});router.post("/report-user", (req, res) => {
+  const { reporter_id, reported_id, reason } = req.body;
+
+  if (!reporter_id || !reported_id || !reason) {
+    return res.status(400).json({ message: "ข้อมูลไม่ครบ" });
+  }
+
+  // 1. ตรวจสอบว่ามีการรายงานไปแล้วหรือยัง
+  const checkSql = "SELECT * FROM user_reports WHERE reporter_id = ? AND reported_id = ?";
+  conn.query(checkSql, [reporter_id, reported_id], (err, checkResult) => {
+    if (err) {
+      console.error("❌ Check report error:", err);
+      return res.status(500).json({ message: "เกิดข้อผิดพลาด" });
+    }
+
+    if (checkResult.length > 0) {
+      return res.status(400).json({ message: "คุณได้รายงานผู้ใช้นี้ไปแล้ว" });
+    }
+
+    // 2. Insert user_reports
+    const insertReportSql = `
+      INSERT INTO user_reports (reporter_id, reported_id, reason, created_at) 
+      VALUES (?, ?, ?, NOW())
+    `;
+    conn.query(insertReportSql, [reporter_id, reported_id, reason], (err2) => {
+      if (err2) {
+        console.error("❌ Insert report error:", err2);
+        return res.status(500).json({ message: "เกิดข้อผิดพลาด" });
+      }
+
+      // 3. Insert notifications (MySQL)
+      const notifSql = `
+        INSERT INTO notifications (sender_uid, receiver_uid, type, message, reason, is_read, created_at) 
+        VALUES (?, ?, 'report_user', ?, ?, false, NOW())
+      `;
+      const notifMessage = "มีการรายงานผู้ใช้ของคุณ";
+      conn.query(notifSql, [reporter_id, reported_id, notifMessage, reason], (err3) => {
+        if (err3) {
+          console.error("❌ Insert notification error:", err3);
+          // ไม่ return เพราะไม่อยากให้ report พัง
+        }
+      });
+
+      // 4. Push Firebase
+      const notifData = {
+        sender_uid: reporter_id,
+        receiver_uid: reported_id,
+        type: "report_user",
+        message: "มีการรายงานผู้ใช้ของคุณ",
+        reason: reason,
+        is_read: false,
+        created_at: admin.database.ServerValue.TIMESTAMP,
+      };
+
+      const db = admin.database();
+      db.ref("notifications").push().set(notifData)
+        .then(() => console.log("📌 Firebase notification inserted"))
+        .catch((firebaseErr) => console.error("❌ Firebase insert error:", firebaseErr));
+
+      res.status(200).json({ message: "รายงานผู้ใช้สำเร็จ" });
+    });
+  });
 });
+
 
 
 
