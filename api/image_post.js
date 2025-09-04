@@ -1519,62 +1519,99 @@ router.post("/report-posts", (req, res) => {
 
 // 📌 2) ดึงรายงานทั้งหมด (สำหรับ Admin)
 // 📌 Admin ดูรายงานโพสต์ + จำนวนคนที่รายงาน
-  router.get("/admin/reports", (req, res) => {
-    const sql = `
-      SELECT 
-        p.post_id,
-        p.post_topic,
-        p.post_description,
-        p.post_date,
-        p.post_status,
-        post_user.name AS post_owner_name,
-        post_user.profile_image AS post_owner_profile_image,
-        COUNT(r.id) AS report_count,
-        JSON_ARRAYAGG(ip.image) AS post_images,
-        JSON_ARRAYAGG(
-          JSON_OBJECT(
-            'report_id', r.id,
-            'reporter_id', r.reporter_id,
-            'reporter_name', reporter.name,
-            'reason', r.reason,
-            'created_at', r.created_at
-          )
-        ) AS reports
-      FROM reports r
-      JOIN post p ON r.post_id = p.post_id
-      JOIN user AS post_user ON p.post_fk_uid = post_user.uid
-      JOIN user AS reporter ON r.reporter_id = reporter.uid
-      LEFT JOIN image_post ip ON p.post_id = ip.image_fk_postid
-      GROUP BY p.post_id
-      ORDER BY report_count DESC
-    `;
+router.get("/admin/post-reports", (req, res) => {
+  const sql = `
+    SELECT 
+      p.post_id,
+      p.post_topic,
+      p.post_description,
+      p.post_date,
+      p.post_status,
+      post_user.name AS post_owner_name,
+      post_user.profile_image AS post_owner_profile_image,
+      COUNT(r.id) AS report_count,
+      JSON_ARRAYAGG(ip.image) AS post_images,
+      JSON_ARRAYAGG(
+        JSON_OBJECT(
+          'report_id', r.id,
+          'reporter_id', reporter.uid,
+          'reporter_name', reporter.name,
+          'reason', r.reason,
+          'created_at', r.created_at
+        )
+      ) AS reports
+    FROM post p
+    LEFT JOIN reports r ON r.post_id = p.post_id
+    LEFT JOIN user AS post_user ON p.post_fk_uid = post_user.uid
+    LEFT JOIN user AS reporter ON r.reporter_id = reporter.uid
+    LEFT JOIN image_post ip ON p.post_id = ip.image_fk_postid
+    GROUP BY p.post_id
+    HAVING report_count > 0
+    ORDER BY report_count DESC
+  `;
 
-    conn.query(sql, (err, rows) => {
-      if (err) {
-        console.error("Fetch Admin Reports Error:", err);
-        return res.status(500).json({ message: "เกิดข้อผิดพลาด" });
-      }
+  conn.query(sql, (err, rows) => {
+    if (err) {
+      console.error("Fetch Post Reports Error:", err);
+      return res.status(500).json({ message: "เกิดข้อผิดพลาด" });
+    }
 
-      // แปลงข้อมูล JSON string เป็น object ในแต่ละ row
-      const posts = rows.map(row => ({
-        postId: row.post_id,
-        topic: row.post_topic,
-        description: row.post_description,
-        date: row.post_date,
-        status: row.post_status,
-        owner: {
-          name: row.post_owner_name,
-          profileImage: row.post_owner_profile_image,
-        },
-        reportCount: row.report_count,
-        images: row.post_images ? JSON.parse(row.post_images) : [],
-        reports: row.reports ? JSON.parse(row.reports) : [],
-      }));
+    const postReports = rows.map(row => ({
+      postId: row.post_id,
+      topic: row.post_topic,
+      description: row.post_description,
+      date: row.post_date,
+      status: row.post_status,
+      owner: {
+        name: row.post_owner_name,
+        profileImage: row.post_owner_profile_image,
+      },
+      reportCount: row.report_count,
+      images: row.post_images ? JSON.parse(row.post_images) : [],
+      reports: row.reports ? JSON.parse(row.reports) : [],
+    }));
 
-      // ส่งผลลัพธ์
-      res.status(200).json(posts);
-    });
+    res.status(200).json(postReports);
   });
+});
+
+router.get("/admin/user-reports", (req, res) => {
+  const sql = `
+    SELECT 
+      ur.report_id,
+      ur.reported_id,
+      reported_user.name AS reported_name,
+      ur.reporter_id,
+      reporter_user.name AS reporter_name,
+      ur.reason,
+      ur.created_at
+    FROM user_reports ur
+    LEFT JOIN user AS reported_user ON ur.reported_id = reported_user.uid
+    LEFT JOIN user AS reporter_user ON ur.reporter_id = reporter_user.uid
+    ORDER BY ur.created_at DESC
+  `;
+
+  conn.query(sql, (err, rows) => {
+    if (err) {
+      console.error("Fetch User Reports Error:", err);
+      return res.status(500).json({ message: "เกิดข้อผิดพลาด" });
+    }
+
+    const userReports = rows.map(row => ({
+      reportId: row.report_id,
+      reportedId: row.reported_id,
+      reportedName: row.reported_name,
+      reporterId: row.reporter_id,
+      reporterName: row.reporter_name,
+      reason: row.reason,
+      createdAt: row.created_at,
+    }));
+
+    res.status(200).json(userReports);
+  });
+});
+
+
 
 
 router.delete("/delete-post/:post_id", async (req, res) => {
