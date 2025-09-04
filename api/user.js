@@ -540,7 +540,6 @@ router.get('/notifications/:uid', (req, res) => {
       .filter(post_id => post_id !== null && post_id !== undefined);
 
     if (postIds.length === 0) {
-      // ไม่มีโพสต์ที่ต้องดึงรูปภาพ
       const formattedNotifications = notificationResults.map(notification => ({
         notification_id: notification.notification_id,
         sender_uid: notification.sender_uid,
@@ -570,7 +569,6 @@ router.get('/notifications/:uid', (req, res) => {
       return res.status(200).json({ notifications: formattedNotifications });
     }
 
-    // ดึงรูปภาพของโพสต์ทั้งหมด
     const imageSql = `
       SELECT * FROM image_post 
       WHERE image_fk_postid IN (${postIds.map(() => '?').join(',')})
@@ -616,6 +614,7 @@ router.get('/notifications/:uid', (req, res) => {
     });
   });
 });
+
 
 // 🔍 Search user by name (ทั้งบางส่วนและเต็ม)
 router.get("/search-user", (req, res) => {
