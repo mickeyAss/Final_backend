@@ -24,7 +24,7 @@ router.get("/get", (req, res) => {
 
       const targetUser = targetResults[0];
 
-      // ดึงโพสต์ทั้งหมดรวมตัวเอง
+      // ดึงโพสต์ทั้งหมด แต่ไม่เอาของ target user เอง
       const postSql = `
         SELECT 
           post.*, 
@@ -34,10 +34,11 @@ router.get("/get", (req, res) => {
           user.chest, user.waist_circumference, user.hip
         FROM post
         JOIN user ON post.post_fk_uid = user.uid
+        WHERE user.uid != ?
         ORDER BY post.post_date DESC
       `;
 
-      conn.query(postSql, (err, postResults) => {
+      conn.query(postSql, [targetUid], (err, postResults) => {
         if (err) return res.status(400).json({ error: 'Post query error' });
         if (postResults.length === 0) return res.status(404).json({ error: 'No posts found' });
 
@@ -156,6 +157,7 @@ router.get("/get", (req, res) => {
     return res.status(500).json({ error: 'Server error' });
   }
 });
+
 
 
 
