@@ -429,7 +429,7 @@ router.get('/saved-posts/:user_id', (req, res) => {
 
 router.post('/post/add', async (req, res) => {
   try {
-    let { post_topic, post_description, post_fk_uid, images, category_id_fk, hashtags, post_status } = req.body;
+    let { post_topic, post_description, post_fk_uid, images, category_id_fk, hashtags, post_status, analysis } = req.body;
     post_topic = post_topic?.trim() || null;
     post_description = post_description?.trim() || null;
     post_status = (post_status?.toLowerCase() === 'friends') ? 'friends' : 'public';
@@ -456,24 +456,23 @@ router.post('/post/add', async (req, res) => {
       await new Promise((resolve, reject) =>
         conn.query(sql, [values], (err) => err ? reject(err) : resolve())
       );
+    }
 
-      // วิเคราะห์ภาพและบันทึกผล
-      for (const imgUrl of images) {
-        try {
-          const [result] = await visionClient.labelDetection(imgUrl);
-          const labels = result.labelAnnotations?.map(label => label.description).join(', ') || '';
+    // Insert analysis (จาก Flutter Vision API)
+    if (Array.isArray(analysis) && analysis.length > 0) {
+      for (const item of analysis) {
+        const { image_url, analysis_text } = item;
+        if (!image_url || !analysis_text) continue;
 
-          const analysisSql = `
-            INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text, created_at)
-            VALUES (?, ?, ?, NOW())
-          `;
-          await new Promise((resolve, reject) =>
-            conn.query(analysisSql, [insertedPostId, imgUrl, labels], (err) => err ? reject(err) : resolve())
-          );
-        } catch (err) {
-          console.error('⚠️ Image analysis failed:', err);
-          // ไม่ throw error → ไม่ crash server
-        }
+        const analysisSql = `
+          INSERT INTO post_image_analysis (post_id_fk, image_url, analysis_text, created_at)
+          VALUES (?, ?, ?, NOW())
+        `;
+        await new Promise((resolve, reject) =>
+          conn.query(analysisSql, [insertedPostId, image_url, analysis_text], (err) =>
+            err ? reject(err) : resolve()
+          )
+        );
       }
     }
 
@@ -495,34 +494,14 @@ router.post('/post/add', async (req, res) => {
       );
     }
 
-    // ดึงโพสต์พร้อม user, images, categories, hashtags, analysis
+    // Response data (ตัดมาเฉพาะ post + images + analysis)
     const postData = await new Promise((resolve, reject) => {
-      const sql = `SELECT post.*, user.uid, user.name, user.email, user.personal_description, user.profile_image,
-                          user.height, user.weight, user.shirt_size, user.chest, user.waist_circumference, user.hip
-                   FROM post
-                   JOIN user ON post.post_fk_uid = user.uid
-                   WHERE post.post_id = ?`;
+      const sql = `SELECT * FROM post WHERE post_id = ?`;
       conn.query(sql, [insertedPostId], (err, results) => err ? reject(err) : resolve(results[0]));
     });
 
     const imageResults = await new Promise((resolve, reject) =>
       conn.query(`SELECT * FROM image_post WHERE image_fk_postid = ?`, [insertedPostId], (err, results) => err ? reject(err) : resolve(results))
-    );
-
-    const categoryResults = await new Promise((resolve, reject) =>
-      conn.query(`
-        SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
-        FROM post_category pc
-        JOIN category c ON pc.category_id_fk = c.cid
-        WHERE pc.post_id_fk = ?`, [insertedPostId], (err, results) => err ? reject(err) : resolve(results))
-    );
-
-    const hashtagResults = await new Promise((resolve, reject) =>
-      conn.query(`
-        SELECT ph.post_id_fk, h.tag_id, h.tag_name 
-        FROM post_hashtags ph
-        JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
-        WHERE ph.post_id_fk = ?`, [insertedPostId], (err, results) => err ? reject(err) : resolve(results))
     );
 
     const analysisResults = await new Promise((resolve, reject) =>
@@ -531,50 +510,19 @@ router.post('/post/add', async (req, res) => {
       )
     );
 
-    // Response
-    const responseData = {
-      post: {
-        post_id: postData.post_id,
-        post_topic: postData.post_topic,
-        post_description: postData.post_description,
-        post_date: postData.post_date,
-        post_fk_cid: postData.post_fk_cid,
-        post_fk_uid: postData.post_fk_uid,
-        post_status: postData.post_status,
-        amount_of_like: 0,
-        amount_of_save: postData.amount_of_save || 0,
-        amount_of_comment: postData.amount_of_comment || 0
-      },
-      user: {
-        uid: postData.uid,
-        name: postData.name,
-        email: postData.email,
-        personal_description: postData.personal_description,
-        profile_image: postData.profile_image,
-        height: postData.height,
-        weight: postData.weight,
-        shirt_size: postData.shirt_size,
-        chest: postData.chest,
-        waist_circumference: postData.waist_circumference,
-        hip: postData.hip
-      },
+    res.status(201).json({
+      message: 'Post created',
+      post: postData,
       images: imageResults,
-      categories: categoryResults.map(c => ({ cid: c.cid, cname: c.cname, cimage: c.cimage, ctype: c.ctype })),
-      hashtags: hashtagResults.map(h => ({ tag_id: h.tag_id, tag_name: h.tag_name })),
-      analysis: analysisResults.map(a => ({
-        image_url: a.image_url,
-        analysis_text: a.analysis_text
-      })),
-      similarity_distance: 0
-    };
-
-    res.status(201).json({ message: 'Post created', post: responseData });
+      analysis: analysisResults
+    });
 
   } catch (error) {
     console.error('❌ Post creation failed', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
 
 // --------------------------------------------
 // API GET /by-user/:uid
