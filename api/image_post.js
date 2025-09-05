@@ -12,6 +12,8 @@ module.exports = router;
 router.get("/get", (req, res) => {
   try {
     const targetUid = req.query.uid;
+    const firstLoad = req.query.firstLoad === 'true';
+    
     if (!targetUid) {
       return res.status(400).json({ error: "Target uid is required" });
     }
@@ -24,21 +26,47 @@ router.get("/get", (req, res) => {
 
       const targetUser = targetResults[0];
 
-      // ดึงโพสต์ทั้งหมด แต่ไม่เอาของ target user เอง
-      const postSql = `
-        SELECT 
-          post.*, 
-          user.uid, user.name, user.email, 
-          user.personal_description, user.profile_image,
-          user.height, user.weight, user.shirt_size, 
-          user.chest, user.waist_circumference, user.hip
-        FROM post
-        JOIN user ON post.post_fk_uid = user.uid
-        WHERE user.uid != ?
-        ORDER BY post.post_date DESC
-      `;
+      // ปรับ SQL ให้รองรับการแสดงโพสต์ใหม่
+      let postSql;
+      let queryParams;
+      
+      if (firstLoad) {
+        // แสดงโพสต์ของตัวเองที่ใหม่ที่สุด + โพสต์คนอื่น
+        postSql = `
+          SELECT 
+            post.*, 
+            user.uid, user.name, user.email, 
+            user.personal_description, user.profile_image,
+            user.height, user.weight, user.shirt_size, 
+            user.chest, user.waist_circumference, user.hip,
+            CASE 
+              WHEN user.uid = ? THEN 1 
+              ELSE 0 
+            END as is_own_post
+          FROM post
+          JOIN user ON post.post_fk_uid = user.uid
+          ORDER BY is_own_post DESC, post.post_date DESC
+        `;
+        queryParams = [targetUid];
+      } else {
+        // โหลดปกติ (ไม่เอาโพสต์ตัวเอง)
+        postSql = `
+          SELECT 
+            post.*, 
+            user.uid, user.name, user.email, 
+            user.personal_description, user.profile_image,
+            user.height, user.weight, user.shirt_size, 
+            user.chest, user.waist_circumference, user.hip,
+            0 as is_own_post
+          FROM post
+          JOIN user ON post.post_fk_uid = user.uid
+          WHERE user.uid != ?
+          ORDER BY post.post_date DESC
+        `;
+        queryParams = [targetUid];
+      }
 
-      conn.query(postSql, [targetUid], (err, postResults) => {
+      conn.query(postSql, queryParams, (err, postResults) => {
         if (err) return res.status(400).json({ error: 'Post query error' });
         if (postResults.length === 0) return res.status(404).json({ error: 'No posts found' });
 
@@ -138,12 +166,27 @@ router.get("/get", (req, res) => {
                     images,
                     categories,
                     hashtags,
-                    similarity_distance: calcDistance(post, targetUser)
+                    similarity_distance: post.is_own_post ? -1 : calcDistance(post, targetUser), // โพสต์ตัวเองให้ distance เป็น -1
+                    is_own_post: post.is_own_post
                   };
                 });
 
-                // เรียงใกล้ → ไกล
-                postsWithData.sort((a, b) => a.similarity_distance - b.similarity_distance);
+                if (firstLoad) {
+                  // จัดเรียงให้โพสต์ตัวเองขึ้นก่อน แล้วค่อยเรียงตามความคล้าย
+                  postsWithData.sort((a, b) => {
+                    if (a.is_own_post && !b.is_own_post) return -1;
+                    if (!a.is_own_post && b.is_own_post) return 1;
+                    if (a.is_own_post && b.is_own_post) {
+                      // ถ้าเป็นโพสต์ตัวเองทั้งคู่ ให้เรียงตามวันที่ (ใหม่ก่อน)
+                      return new Date(b.post.post_date) - new Date(a.post.post_date);
+                    }
+                    // ถ้าไม่ใช่โพสต์ตัวเอง ให้เรียงตามความคล้าย
+                    return a.similarity_distance - b.similarity_distance;
+                  });
+                } else {
+                  // เรียงตามความคล้ายคลึงปกติ
+                  postsWithData.sort((a, b) => a.similarity_distance - b.similarity_distance);
+                }
 
                 res.status(200).json(postsWithData);
               });
@@ -157,10 +200,6 @@ router.get("/get", (req, res) => {
     return res.status(500).json({ error: 'Server error' });
   }
 });
-
-
-
-
 
 const admin = require('firebase-admin');
 // ต้องตั้งค่า Firebase Admin SDK ก่อน (โหลด service account json)
