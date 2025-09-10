@@ -349,6 +349,90 @@ router.get("/hashtag-posts", (req, res) => {
   }
 });
 
+router.get("/analysis-posts", (req, res) => {
+  try {
+    const q = req.query.q?.trim();
+    if (!q) {
+      return res.status(400).json({ error: "กรุณาใส่คำค้นหา" });
+    }
+
+    // 1. ค้นหา post_id จาก analysis_text
+    const analysisSql = `
+      SELECT post_id_fk, image_url, analysis_text 
+      FROM post_image_analysis
+      WHERE analysis_text LIKE ?
+    `;
+    const searchPattern = `%${q}%`;
+
+    conn.query(analysisSql, [searchPattern], (err, analysisResults) => {
+      if (err) return res.status(400).json({ error: "Analysis query error" });
+      if (analysisResults.length === 0)
+        return res.status(404).json({ error: "ไม่พบโพสต์ที่ค้นหา" });
+
+      const postIds = [...new Set(analysisResults.map((a) => a.post_id_fk))];
+
+      // 2. ดึงโพสต์ + user
+      const postSql = `
+        SELECT 
+          p.post_id, p.post_topic, p.post_description, p.post_date, p.post_fk_uid,
+          u.uid, u.name, u.email, u.profile_image
+        FROM post p
+        JOIN user u ON p.post_fk_uid = u.uid
+        WHERE p.post_id IN (?)
+        ORDER BY p.post_date DESC
+      `;
+
+      conn.query(postSql, [postIds], (err, posts) => {
+        if (err) return res.status(400).json({ error: "Post query error" });
+
+        // 3. ดึงรูปภาพทั้งหมดที่เกี่ยวข้อง
+        const imageSql = "SELECT * FROM image_post WHERE image_fk_postid IN (?)";
+        conn.query(imageSql, [postIds], (err, images) => {
+          if (err) return res.status(400).json({ error: "Image query error" });
+
+          // 4. รวมข้อมูลโพสต์ + รูป + user profile image + analysis_text
+          const result = posts.map((p) => {
+            const postImages = images
+              .filter((img) => img.image_fk_postid === p.post_id)
+              .map((img) => img.image);
+
+            const postAnalysis = analysisResults
+              .filter((a) => a.post_id_fk === p.post_id)
+              .map((a) => ({
+                image_url: a.image_url,
+                analysis_text: a.analysis_text,
+              }));
+
+            return {
+              post_id: p.post_id,
+              post_topic: p.post_topic,
+              post_description: p.post_description,
+              post_date: p.post_date,
+              post_fk_uid: p.post_fk_uid,
+              user: {
+                uid: p.uid,
+                name: p.name,
+                email: p.email,
+                profile_image: p.profile_image || null,
+              },
+              images: postImages,
+              analysis: postAnalysis, // ✅ เพิ่มตรงนี้
+            };
+          });
+
+          res.status(200).json({
+            total_posts: result.length,
+            posts: result,
+          });
+        });
+      });
+    });
+  } catch (err) {
+    console.error("Server error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 
 router.post('/search-posts-by-text', (req, res) => {
   try {
@@ -395,7 +479,6 @@ router.post('/search-posts-by-text', (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
-
 
 
 
