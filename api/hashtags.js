@@ -349,29 +349,39 @@ router.get("/hashtag-posts", (req, res) => {
   }
 });
 
-router.get("/analysis-posts", (req, res) => {
+
+// ✅ ค้นหาโพสต์ด้วย image_url หรือชื่อไฟล์
+router.get("/image-posts", (req, res) => {
   try {
-    const q = req.query.q?.trim();
-    if (!q) {
-      return res.status(400).json({ error: "กรุณาใส่คำค้นหา" });
+    let image = req.query.image?.trim();
+    if (!image) {
+      return res.status(400).json({ error: "กรุณาใส่ image_url หรือชื่อไฟล์" });
     }
 
-    // 1. ค้นหา post_id จาก analysis_text
-    const analysisSql = `
+    // ถ้ามี query string (?alt=media...) → ตัดออก
+    image = image.split("?")[0];
+
+    // ถ้าเป็น URL → เอาแค่ชื่อไฟล์สุดท้าย
+    const parts = image.split("/");
+    const fileName = parts[parts.length - 1];
+
+    // ใช้ LIKE หาได้ทั้ง URL เต็ม และชื่อไฟล์
+    const searchPattern = `%${fileName}%`;
+
+    const sql = `
       SELECT post_id_fk, image_url, analysis_text 
       FROM post_image_analysis
-      WHERE analysis_text LIKE ?
+      WHERE image_url LIKE ?
     `;
-    const searchPattern = `%${q}%`;
 
-    conn.query(analysisSql, [searchPattern], (err, analysisResults) => {
-      if (err) return res.status(400).json({ error: "Analysis query error" });
-      if (analysisResults.length === 0)
+    conn.query(sql, [searchPattern], (err, imageResults) => {
+      if (err) return res.status(400).json({ error: "Image search error" });
+      if (imageResults.length === 0) {
         return res.status(404).json({ error: "ไม่พบโพสต์ที่ค้นหา" });
+      }
 
-      const postIds = [...new Set(analysisResults.map((a) => a.post_id_fk))];
+      const postIds = [...new Set(imageResults.map((a) => a.post_id_fk))];
 
-      // 2. ดึงโพสต์ + user
       const postSql = `
         SELECT 
           p.post_id, p.post_topic, p.post_description, p.post_date, p.post_fk_uid,
@@ -385,18 +395,16 @@ router.get("/analysis-posts", (req, res) => {
       conn.query(postSql, [postIds], (err, posts) => {
         if (err) return res.status(400).json({ error: "Post query error" });
 
-        // 3. ดึงรูปภาพทั้งหมดที่เกี่ยวข้อง
-        const imageSql = "SELECT * FROM image_post WHERE image_fk_postid IN (?)";
-        conn.query(imageSql, [postIds], (err, images) => {
+        const sqlImages = "SELECT * FROM image_post WHERE image_fk_postid IN (?)";
+        conn.query(sqlImages, [postIds], (err, images) => {
           if (err) return res.status(400).json({ error: "Image query error" });
 
-          // 4. รวมข้อมูลโพสต์ + รูป + user profile image + analysis_text
           const result = posts.map((p) => {
             const postImages = images
               .filter((img) => img.image_fk_postid === p.post_id)
               .map((img) => img.image);
 
-            const postAnalysis = analysisResults
+            const postAnalysis = imageResults
               .filter((a) => a.post_id_fk === p.post_id)
               .map((a) => ({
                 image_url: a.image_url,
@@ -416,7 +424,7 @@ router.get("/analysis-posts", (req, res) => {
                 profile_image: p.profile_image || null,
               },
               images: postImages,
-              analysis: postAnalysis, // ✅ เพิ่มตรงนี้
+              analysis: postAnalysis,
             };
           });
 
