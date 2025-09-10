@@ -351,37 +351,36 @@ router.get("/hashtag-posts", (req, res) => {
 
 
 // ✅ ค้นหาโพสต์ด้วย image_url หรือชื่อไฟล์
-router.get("/image-posts", (req, res) => {
+// ค้นหาโพสต์จาก Vision API (ส่งเป็น array ของ image URLs)
+router.post("/vision-search-posts", (req, res) => {
   try {
-    let image = req.query.image?.trim();
-    if (!image) {
-      return res.status(400).json({ error: "กรุณาใส่ image_url หรือชื่อไฟล์" });
+    const { imageUrls } = req.body; // ต้องส่งเป็น array ของ URL
+    if (!imageUrls || !Array.isArray(imageUrls) || imageUrls.length === 0) {
+      return res.status(400).json({ error: "กรุณาส่ง imageUrls" });
     }
 
-    // ถ้ามี query string (?alt=media...) → ตัดออก
-    image = image.split("?")[0];
+    // สร้าง pattern สำหรับ LIKE
+    const searchPatterns = imageUrls.map((url) => {
+      const fileName = url.split("/").pop()?.split("?")[0];
+      return `%${fileName}%`;
+    });
 
-    // ถ้าเป็น URL → เอาแค่ชื่อไฟล์สุดท้าย
-    const parts = image.split("/");
-    const fileName = parts[parts.length - 1];
-
-    // ใช้ LIKE หาได้ทั้ง URL เต็ม และชื่อไฟล์
-    const searchPattern = `%${fileName}%`;
-
+    // 1. ค้นหาใน post_image_analysis
     const sql = `
-      SELECT post_id_fk, image_url, analysis_text 
+      SELECT post_id_fk, image_url, analysis_text
       FROM post_image_analysis
-      WHERE image_url LIKE ?
+      WHERE ${searchPatterns.map(() => "image_url LIKE ?").join(" OR ")}
     `;
 
-    conn.query(sql, [searchPattern], (err, imageResults) => {
+    conn.query(sql, searchPatterns, (err, imageResults) => {
       if (err) return res.status(400).json({ error: "Image search error" });
       if (imageResults.length === 0) {
-        return res.status(404).json({ error: "ไม่พบโพสต์ที่ค้นหา" });
+        return res.status(404).json({ error: "ไม่พบโพสต์ที่เกี่ยวข้อง" });
       }
 
       const postIds = [...new Set(imageResults.map((a) => a.post_id_fk))];
 
+      // 2. ดึงโพสต์ + user + images
       const postSql = `
         SELECT 
           p.post_id, p.post_topic, p.post_description, p.post_date, p.post_fk_uid,
