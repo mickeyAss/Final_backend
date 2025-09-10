@@ -350,92 +350,48 @@ router.get("/hashtag-posts", (req, res) => {
 });
 
 
-// ✅ ค้นหาโพสต์ด้วย image_url หรือชื่อไฟล์
-// ค้นหาโพสต์จาก Vision API (ส่งเป็น array ของ image URLs)
-router.post("/vision-search-posts", (req, res) => {
+router.post('/search-posts-by-text', (req, res) => {
   try {
-    const { imageUrls } = req.body; // ต้องส่งเป็น array ของ URL
-    if (!imageUrls || !Array.isArray(imageUrls) || imageUrls.length === 0) {
-      return res.status(400).json({ error: "กรุณาส่ง imageUrls" });
-    }
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ error: "กรุณาส่งข้อความ" });
 
-    // สร้าง pattern สำหรับ LIKE
-    const searchPatterns = imageUrls.map((url) => {
-      const fileName = url.split("/").pop()?.split("?")[0];
-      return `%${fileName}%`;
-    });
-
-    // 1. ค้นหาใน post_image_analysis
+    // ค้นหาใน analysis_text ใช้ LIKE หรือ Full-Text Search
     const sql = `
-      SELECT post_id_fk, image_url, analysis_text
-      FROM post_image_analysis
-      WHERE ${searchPatterns.map(() => "image_url LIKE ?").join(" OR ")}
+      SELECT pia.post_id_fk, pia.image_url, pia.analysis_text,
+             p.post_topic, p.post_description, p.post_fk_uid, p.post_date,
+             u.uid, u.name, u.email, u.profile_image
+      FROM post_image_analysis pia
+      JOIN post p ON pia.post_id_fk = p.post_id
+      JOIN user u ON p.post_fk_uid = u.uid
+      WHERE pia.analysis_text LIKE ?
+      ORDER BY p.post_date DESC
+      LIMIT 20
     `;
+    const searchPattern = `%${text}%`;
 
-    conn.query(sql, searchPatterns, (err, imageResults) => {
-      if (err) return res.status(400).json({ error: "Image search error" });
-      if (imageResults.length === 0) {
-        return res.status(404).json({ error: "ไม่พบโพสต์ที่เกี่ยวข้อง" });
-      }
+    conn.query(sql, [searchPattern], (err, results) => {
+      if (err) return res.status(400).json({ error: "Query error" });
+      if (results.length === 0) return res.status(404).json({ error: "ไม่พบโพสต์ที่เกี่ยวข้อง" });
 
-      const postIds = [...new Set(imageResults.map((a) => a.post_id_fk))];
+      const posts = results.map(r => ({
+        post_id: r.post_id_fk,
+        post_topic: r.post_topic,
+        post_description: r.post_description,
+        post_date: r.post_date,
+        post_fk_uid: r.post_fk_uid,
+        user: {
+          uid: r.uid,
+          name: r.name,
+          email: r.email,
+          profile_image: r.profile_image
+        },
+        images: [{ image_url: r.image_url, analysis_text: r.analysis_text }]
+      }));
 
-      // 2. ดึงโพสต์ + user + images
-      const postSql = `
-        SELECT 
-          p.post_id, p.post_topic, p.post_description, p.post_date, p.post_fk_uid,
-          u.uid, u.name, u.email, u.profile_image
-        FROM post p
-        JOIN user u ON p.post_fk_uid = u.uid
-        WHERE p.post_id IN (?)
-        ORDER BY p.post_date DESC
-      `;
-
-      conn.query(postSql, [postIds], (err, posts) => {
-        if (err) return res.status(400).json({ error: "Post query error" });
-
-        const sqlImages = "SELECT * FROM image_post WHERE image_fk_postid IN (?)";
-        conn.query(sqlImages, [postIds], (err, images) => {
-          if (err) return res.status(400).json({ error: "Image query error" });
-
-          const result = posts.map((p) => {
-            const postImages = images
-              .filter((img) => img.image_fk_postid === p.post_id)
-              .map((img) => img.image);
-
-            const postAnalysis = imageResults
-              .filter((a) => a.post_id_fk === p.post_id)
-              .map((a) => ({
-                image_url: a.image_url,
-                analysis_text: a.analysis_text,
-              }));
-
-            return {
-              post_id: p.post_id,
-              post_topic: p.post_topic,
-              post_description: p.post_description,
-              post_date: p.post_date,
-              post_fk_uid: p.post_fk_uid,
-              user: {
-                uid: p.uid,
-                name: p.name,
-                email: p.email,
-                profile_image: p.profile_image || null,
-              },
-              images: postImages,
-              analysis: postAnalysis,
-            };
-          });
-
-          res.status(200).json({
-            total_posts: result.length,
-            posts: result,
-          });
-        });
-      });
+      res.status(200).json({ total_posts: posts.length, posts });
     });
   } catch (err) {
-    console.error("Server error:", err);
+    console.error(err);
     res.status(500).json({ error: "Server error" });
   }
 });
