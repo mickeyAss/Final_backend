@@ -705,72 +705,52 @@ router.put("/update-profile", (req, res) => {
 });
 
 
-// ขอ Reset Password โดยใช้ email
-router.post("/forgot-password", (req, res) => {
+const otpStore = {}; // เก็บ OTP ชั่วคราว (ใน production ใช้ DB)
+
+router.post('/send-otp', async (req, res) => {
   const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email is required' });
 
-  if (!email) {
-    return res.status(400).json({ error: "Email is required" });
+  try {
+    const results = await new Promise((resolve, reject) => {
+      conn.query('SELECT * FROM user WHERE email = ?', [email], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+
+    if (results.length === 0) return res.status(404).json({ error: 'User not found' });
+
+    const otp = Math.floor(100000 + Math.random() * 900000); // สุ่ม 6 หลัก
+    otpStore[email] = { otp, expire: Date.now() + 5*60*1000 }; // หมดอายุ 5 นาที
+
+    // 🔹 ส่ง OTP ผ่าน Firebase Email (หรือ Nodemailer ถ้าใช้ได้)
+    await admin.auth().generatePasswordResetLink(email); // Firebase จะส่งลิงก์
+    console.log(`[OTP] ${email} -> ${otp}`);
+
+    return res.status(200).json({ message: 'OTP sent successfully' });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Server error' });
   }
+});
 
-  const sql = "SELECT uid, email FROM user WHERE email = ?";
-  conn.query(sql, [email], (err, results) => {
-    if (err) {
-      console.error("[Forgot Password] DB error:", err);
-      return res.status(500).json({ error: "Database query error" });
-    }
+router.post('/verify-otp', (req, res) => {
+  const { email, otp, newPassword } = req.body;
+  if (!email || !otp || !newPassword) return res.status(400).json({ error: 'Missing parameters' });
 
-    if (results.length === 0) {
-      return res.status(404).json({ error: "User not found" });
-    }
+  const record = otpStore[email];
+  if (!record) return res.status(400).json({ error: 'OTP not found or expired' });
+  if (record.expire < Date.now()) return res.status(400).json({ error: 'OTP expired' });
+  if (record.otp != otp) return res.status(400).json({ error: 'Invalid OTP' });
 
-    // ✅ ปกติควรสร้าง token และส่งอีเมล แต่ในที่นี้จะส่ง uid กลับไป
-    const user = results[0];
-
-    return res.status(200).json({
-      message: "Password reset request successful",
-      uid: user.uid,
-      email: user.email,
+  // เปลี่ยนรหัสผ่านใน MySQL
+  bcrypt.hash(newPassword, 10, (err, hash) => {
+    if (err) return res.status(500).json({ error: 'Hash error' });
+    conn.query('UPDATE user SET password=? WHERE email=?', [hash, email], (err2) => {
+      if (err2) return res.status(500).json({ error: 'DB error' });
+      delete otpStore[email]; // ลบ OTP หลังใช้
+      return res.status(200).json({ message: 'Password reset successful' });
     });
   });
 });
-
-// รีเซ็ตรหัสผ่านใหม่
-router.put("/reset-password", async (req, res) => {
-  const { uid, newPassword } = req.body;
-
-  if (!uid || !newPassword) {
-    return res.status(400).json({ error: "uid and newPassword are required" });
-  }
-
-  // ตรวจสอบรหัสผ่านให้ตรงตาม policy
-  const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
-  if (!passwordRegex.test(newPassword)) {
-    return res.status(400).json({
-      error:
-        "Password must be at least 8 characters and contain uppercase, lowercase, and a number",
-    });
-  }
-
-  try {
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-    const sql = "UPDATE user SET password = ? WHERE uid = ?";
-    conn.query(sql, [hashedPassword, uid], (err, result) => {
-      if (err) {
-        console.error("[Reset Password] DB error:", err);
-        return res.status(500).json({ error: "Database update error" });
-      }
-
-      if (result.affectedRows === 0) {
-        return res.status(404).json({ error: "User not found" });
-      }
-
-      return res.status(200).json({ message: "Password reset successful" });
-    });
-  } catch (err) {
-    console.error("[Reset Password] Server error:", err);
-    return res.status(500).json({ error: "Server error" });
-  }
-});
-
