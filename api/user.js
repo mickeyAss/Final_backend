@@ -703,3 +703,74 @@ router.put("/update-profile", (req, res) => {
     return res.status(200).json({ message: "Profile updated successfully" });
   });
 });
+
+
+// ขอ Reset Password โดยใช้ email
+router.post("/forgot-password", (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ error: "Email is required" });
+  }
+
+  const sql = "SELECT uid, email FROM user WHERE email = ?";
+  conn.query(sql, [email], (err, results) => {
+    if (err) {
+      console.error("[Forgot Password] DB error:", err);
+      return res.status(500).json({ error: "Database query error" });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // ✅ ปกติควรสร้าง token และส่งอีเมล แต่ในที่นี้จะส่ง uid กลับไป
+    const user = results[0];
+
+    return res.status(200).json({
+      message: "Password reset request successful",
+      uid: user.uid,
+      email: user.email,
+    });
+  });
+});
+
+// รีเซ็ตรหัสผ่านใหม่
+router.put("/reset-password", async (req, res) => {
+  const { uid, newPassword } = req.body;
+
+  if (!uid || !newPassword) {
+    return res.status(400).json({ error: "uid and newPassword are required" });
+  }
+
+  // ตรวจสอบรหัสผ่านให้ตรงตาม policy
+  const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
+  if (!passwordRegex.test(newPassword)) {
+    return res.status(400).json({
+      error:
+        "Password must be at least 8 characters and contain uppercase, lowercase, and a number",
+    });
+  }
+
+  try {
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    const sql = "UPDATE user SET password = ? WHERE uid = ?";
+    conn.query(sql, [hashedPassword, uid], (err, result) => {
+      if (err) {
+        console.error("[Reset Password] DB error:", err);
+        return res.status(500).json({ error: "Database update error" });
+      }
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      return res.status(200).json({ message: "Password reset successful" });
+    });
+  } catch (err) {
+    console.error("[Reset Password] Server error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
