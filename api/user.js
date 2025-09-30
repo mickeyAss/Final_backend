@@ -2,6 +2,8 @@ var express = require('express');
 var router = express.Router();
 var conn = require('../dbconnect');
 
+const { google } = require('googleapis');
+const nodemailer = require('nodemailer');
 const admin = require('firebase-admin');
 const serviceAccount = require('../final-project-2f65c-firebase-adminsdk-fbsvc-b7cc350036.json');
 
@@ -705,52 +707,3 @@ router.put("/update-profile", (req, res) => {
 });
 
 
-const otpStore = {}; // เก็บ OTP ชั่วคราว (ใน production ใช้ DB)
-
-router.post('/send-otp', async (req, res) => {
-  const { email } = req.body;
-  if (!email) return res.status(400).json({ error: 'Email is required' });
-
-  try {
-    const results = await new Promise((resolve, reject) => {
-      conn.query('SELECT * FROM user WHERE email = ?', [email], (err, results) => {
-        if (err) reject(err);
-        else resolve(results);
-      });
-    });
-
-    if (results.length === 0) return res.status(404).json({ error: 'User not found' });
-
-    const otp = Math.floor(100000 + Math.random() * 900000); // สุ่ม 6 หลัก
-    otpStore[email] = { otp, expire: Date.now() + 5*60*1000 }; // หมดอายุ 5 นาที
-
-    // 🔹 ส่ง OTP ผ่าน Firebase Email (หรือ Nodemailer ถ้าใช้ได้)
-    await admin.auth().generatePasswordResetLink(email); // Firebase จะส่งลิงก์
-    console.log(`[OTP] ${email} -> ${otp}`);
-
-    return res.status(200).json({ message: 'OTP sent successfully' });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Server error' });
-  }
-});
-
-router.post('/verify-otp', (req, res) => {
-  const { email, otp, newPassword } = req.body;
-  if (!email || !otp || !newPassword) return res.status(400).json({ error: 'Missing parameters' });
-
-  const record = otpStore[email];
-  if (!record) return res.status(400).json({ error: 'OTP not found or expired' });
-  if (record.expire < Date.now()) return res.status(400).json({ error: 'OTP expired' });
-  if (record.otp != otp) return res.status(400).json({ error: 'Invalid OTP' });
-
-  // เปลี่ยนรหัสผ่านใน MySQL
-  bcrypt.hash(newPassword, 10, (err, hash) => {
-    if (err) return res.status(500).json({ error: 'Hash error' });
-    conn.query('UPDATE user SET password=? WHERE email=?', [hash, email], (err2) => {
-      if (err2) return res.status(500).json({ error: 'DB error' });
-      delete otpStore[email]; // ลบ OTP หลังใช้
-      return res.status(200).json({ message: 'Password reset successful' });
-    });
-  });
-});

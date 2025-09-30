@@ -1643,69 +1643,6 @@ router.delete("/delete-post/:post_id", async (req, res) => {
   }
 });
 
-
-router.post("/report-user", (req, res) => {
-  const { reported_id, reporter_id, reason } = req.body;
-
-  if (!reported_id || !reporter_id || !reason) {
-    return res.status(400).json({ message: "ข้อมูลไม่ครบ" });
-  }
-
-  // ตรวจสอบว่าผู้ใช้รายงานแล้วหรือยัง
-  const checkSql = `SELECT * FROM user_reports WHERE reported_id = ? AND reporter_id = ?`;
-  conn.query(checkSql, [reported_id, reporter_id], (err, existingReports) => {
-    if (err) {
-      console.error("Report User Error:", err);
-      return res.status(500).json({ message: "เกิดข้อผิดพลาด" });
-    }
-
-    if (existingReports.length > 0) {
-      return res.status(400).json({ message: "คุณได้รายงานผู้ใช้นี้ไปแล้ว" });
-    }
-
-    // Insert รายงานผู้ใช้ลง MySQL
-    const insertSql = `INSERT INTO user_reports (reported_id, reporter_id, reason) VALUES (?, ?, ?)`;
-    conn.query(insertSql, [reported_id, reporter_id, reason], (err2) => {
-      if (err2) {
-        console.error("Report User Insert Error:", err2);
-        return res.status(500).json({ message: "เกิดข้อผิดพลาด" });
-      }
-
-      // ไม่ส่ง notification ถ้าผู้ใช้รายงานตัวเอง
-      if (reported_id !== reporter_id) {
-        const notifMessage = `${reason}`;
-
-        // Insert notification ลง MySQL
-        const notifSql = `
-          INSERT INTO notifications (sender_uid, receiver_uid, type, message)
-          VALUES (?, ?, 'report_user', ?)
-        `;
-        conn.query(notifSql, [reporter_id, reported_id, notifMessage], (err3) => {
-          if (err3) console.error('[Report User] Notification insert failed:', err3);
-        });
-
-        // เพิ่ม notification ลง Firebase
-        const notifData = {
-          sender_uid: reporter_id,
-          receiver_uid: reported_id,
-          type: 'report_user',
-          message: notifMessage,
-          reason,
-          is_read: false,
-          created_at: admin.database.ServerValue.TIMESTAMP
-        };
-
-        const db = admin.database();
-        db.ref('notifications').push().set(notifData)
-          .then(() => console.log('[Report User] Notification added to Firebase'))
-          .catch((firebaseErr) => console.log('[Report User] Firebase notification failed:', firebaseErr));
-      }
-
-      res.status(200).json({ message: "รายงานผู้ใช้สำเร็จ" });
-    });
-  });
-});
-
 router.post("/report-user", (req, res) => {
   const { reporter_id, reported_id, reason } = req.body;
 
