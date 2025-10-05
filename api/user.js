@@ -707,3 +707,121 @@ router.put("/update-profile", (req, res) => {
 });
 
 
+//ลืมรหัส by Pumitle
+
+const resetTokens = {};
+
+//เส้นทางการทำงานลืมรหัส
+router.post('/forgot-password', (req, res) => {
+    const { email } = req.body;
+    
+    // สร้างเลขยืนยันตัวตน 6 หลัก
+    const verificationCode = Math.floor(100000 + Math.random() * 900000); // สร้างเลข 6 หลัก
+    
+    // เก็บเลขยืนยันตัวตนและวันหมดอายุในหน่วยความจำ
+    const expires = new Date(Date.now() + 60000); // หมดอายุใน 1 ชั่วโมง
+    resetTokens[verificationCode] = { email, expires };
+    
+    // สร้างลิงก์สำหรับยืนยันตัวตน
+        const resetLink = `app://reset-password?code=${verificationCode}`;
+    
+
+    // ตั้งค่าการส่งอีเมล
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: 'sarawut.sutthipanyo@gmail.com',  // ใส่อีเมลตรงๆ
+        pass: 'vobi xukg ijoo qatm'        // ใส่รหัสผ่านตรงๆ
+      }
+    });
+  
+    const mailOptions = {
+      from: 'sarawut.sutthipanyo@gmail.com',
+      to: email,
+      subject: 'รหัสยืนยันตัวตนสำหรับรีเซ็ตรหัสผ่าน',
+      html: `
+      <div style="display: flex; justify-content: flex-end; align-items: center; height: 100vh; font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; padding-right: 20px;">
+        <div>
+          <h1 style="font-size: 44px; color: #333; align-items: center;" >รหัสยืนยันตัวตน</h1>
+          <p style="font-size: 36px; color:rgb(164, 6, 6); font-weight: bold;">${verificationCode}</p>
+          <p style="font-size: 18px; color: #555;">กรุณาใช้รหัสนี้เพื่อรีเซ็ตรหัสผ่านของคุณ</p>
+        </div>
+      </div>`
+    };
+  
+    // ส่งอีเมล
+    transporter.sendMail(mailOptions, (err, info) => {
+        if (err) {
+          console.error('Error:', err);  // แสดงรายละเอียดข้อผิดพลาด
+          return res.status(500).json({ message: 'ส่งอีเมลไม่สำเร็จ' });
+        }
+        res.json({ message: 'ส่งรหัสยืนยันตัวตนแล้ว' });
+    });
+});
+
+
+//ตรวจสอบรหัสยืนยันตัวตน
+router.post('/verify-code', (req, res) => {
+  const { verificationCode, email } = req.body;
+
+  // ตรวจสอบว่ามีรหัสอยู่ในหน่วยความจำหรือไม่
+  if (!resetTokens[verificationCode]) {
+      return res.status(400).json({ message: 'รหัสยืนยันตัวตนไม่ถูกต้องหรือหมดอายุ' });
+  }
+
+  const tokenData = resetTokens[verificationCode];
+
+  // ตรวจสอบวันหมดอายุ
+  if (new Date() > tokenData.expires) {
+      delete resetTokens[verificationCode];  // ลบโค้ดที่หมดอายุ
+      return res.status(400).json({ message: 'รหัสยืนยันตัวตนหมดอายุ' });
+  }
+
+  // ตรวจสอบว่าอีเมลตรงกันหรือไม่
+  if (tokenData.email !== email) {
+      return res.status(400).json({ message: 'อีเมลไม่ตรงกับรหัสยืนยันตัวตน' });
+  }
+
+  // รหัสถูกต้อง ✅
+  res.json({ message: 'รหัสยืนยันตัวตนถูกต้อง' });
+})
+
+router.post("/reset-password", async (req, res) => {
+  const { email, newPassword } = req.body;
+
+  if (!email || !newPassword || email.trim() === "" || newPassword.trim() === "") {
+    return res.status(400).json({ error: "กรุณาระบุอีเมลและรหัสผ่านใหม่" });
+  }
+
+  // ตรวจสอบเงื่อนไขรหัสผ่าน
+  const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
+  if (!passwordRegex.test(newPassword)) {
+    return res.status(400).json({
+      error: "รหัสผ่านต้องมี ตัวพิมพ์ใหญ่(A-Z) อย่างน้อย 1 ตัว, ตัวพิมพ์เล็ก(a-z) อย่างน้อย 1 ตัว, ตัวเลข(0-9) อย่างน้อย 1 ตัว และยาวอย่างน้อย 8 ตัวอักษร",
+    });
+  }
+
+  try {
+    // Hash รหัสผ่านใหม่
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    const updateQuery = "UPDATE Users SET password = ? WHERE email = ?";
+    conn.query(updateQuery, [hashedPassword, email], (err, result) => {
+      if (err) {
+        console.error("Error updating password:", err);
+        return res.status(500).json({ message: "ไม่สามารถรีเซ็ตรหัสผ่านได้" });
+      }
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ error: "ไม่พบบัญชีผู้ใช้ที่มีอีเมลนี้" });
+      }
+
+      res.json({ message: "รีเซ็ตรหัสผ่านสำเร็จ" });
+    });
+  } catch (hashErr) {
+    console.error("Hash error:", hashErr);
+    res.status(500).json({ error: "เกิดข้อผิดพลาดในการประมวลผลรหัสผ่าน" });
+  }
+});
+
