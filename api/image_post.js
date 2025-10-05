@@ -1708,6 +1708,122 @@ router.post("/report-user", (req, res) => {
 });
 
 
+// --------------------------------------------
+// API PUT /post/edit/:post_id
+// แก้ไขโพสต์ (ยกเว้นรูปภาพ)
+// --------------------------------------------
+router.put('/post/edit/:post_id', async (req, res) => {
+  try {
+    const { post_id } = req.params;
+    let { post_topic, post_description, post_status, category_id_fk, hashtags, user_id } = req.body;
+
+    // Validate required fields
+    if (!post_id || !user_id) {
+      return res.status(400).json({ error: 'Missing post_id or user_id' });
+    }
+
+    // Sanitize inputs
+    post_topic = post_topic?.trim() || null;
+    post_description = post_description?.trim() || null;
+    post_status = (post_status?.toLowerCase() === 'friends') ? 'friends' : 'public';
+
+    // Helper function for promisified queries
+    const query = (sql, params) =>
+      new Promise((resolve, reject) => {
+        conn.query(sql, params, (err, result) => {
+          if (err) reject(err);
+          else resolve(result);
+        });
+      });
+
+    // 1. ตรวจสอบว่าโพสต์นี้เป็นของ user หรือไม่
+    const checkOwnerSql = 'SELECT post_fk_uid FROM post WHERE post_id = ?';
+    const ownerResult = await query(checkOwnerSql, [post_id]);
+
+    if (ownerResult.length === 0) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+
+    if (ownerResult[0].post_fk_uid !== user_id) {
+      return res.status(403).json({ error: 'Unauthorized: You can only edit your own posts' });
+    }
+
+    // 2. อัปเดตข้อมูลโพสต์หลัก
+    const updatePostSql = `
+      UPDATE post 
+      SET post_topic = ?, post_description = ?, post_status = ?
+      WHERE post_id = ?
+    `;
+    await query(updatePostSql, [post_topic, post_description, post_status, post_id]);
+
+    // 3. อัปเดต categories (ลบของเก่า แล้วเพิ่มใหม่)
+    await query('DELETE FROM post_category WHERE post_id_fk = ?', [post_id]);
+    
+    if (Array.isArray(category_id_fk) && category_id_fk.length > 0) {
+      const categoryValues = category_id_fk.map(cid => [cid, post_id]);
+      const insertCategorySql = 'INSERT INTO post_category (category_id_fk, post_id_fk) VALUES ?';
+      await query(insertCategorySql, [categoryValues]);
+    }
+
+    // 4. อัปเดต hashtags (ลบของเก่า แล้วเพิ่มใหม่)
+    await query('DELETE FROM post_hashtags WHERE post_id_fk = ?', [post_id]);
+    
+    if (Array.isArray(hashtags) && hashtags.length > 0) {
+      const hashtagValues = hashtags.map(tagId => [post_id, tagId]);
+      const insertHashtagSql = 'INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?';
+      await query(insertHashtagSql, [hashtagValues]);
+    }
+
+    // 5. ดึงข้อมูลโพสต์ที่อัปเดตแล้วพร้อม related data
+    const postData = await query('SELECT * FROM post WHERE post_id = ?', [post_id]);
+    
+    const imageResults = await query(
+      'SELECT * FROM image_post WHERE image_fk_postid = ?', 
+      [post_id]
+    );
+    
+    const categoryResults = await query(`
+      SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
+      FROM post_category pc
+      JOIN category c ON pc.category_id_fk = c.cid
+      WHERE pc.post_id_fk = ?
+    `, [post_id]);
+    
+    const hashtagResults = await query(`
+      SELECT ph.post_id_fk, h.tag_id, h.tag_name
+      FROM post_hashtags ph
+      JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
+      WHERE ph.post_id_fk = ?
+    `, [post_id]);
+
+    const analysisResults = await query(
+      'SELECT * FROM post_image_analysis WHERE post_id_fk = ?', 
+      [post_id]
+    );
+
+    res.status(200).json({
+      message: 'Post updated successfully',
+      post: postData[0],
+      images: imageResults,
+      categories: categoryResults.map(cat => ({
+        cid: cat.cid,
+        cname: cat.cname,
+        cimage: cat.cimage,
+        ctype: cat.ctype
+      })),
+      hashtags: hashtagResults.map(ht => ({
+        tag_id: ht.tag_id,
+        tag_name: ht.tag_name
+      })),
+      analysis: analysisResults
+    });
+
+  } catch (error) {
+    console.error('❌ Post update failed:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 
 
 
