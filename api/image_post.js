@@ -1710,12 +1710,12 @@ router.post("/report-user", (req, res) => {
 
 // --------------------------------------------
 // API PUT /post/edit/:post_id
-// แก้ไขโพสต์ (ยกเว้นรูปภาพ)
+// แก้ไขโพสต์ (เฉพาะ topic, description และ hashtags)
 // --------------------------------------------
 router.put('/post/edit/:post_id', async (req, res) => {
   try {
     const { post_id } = req.params;
-    let { post_topic, post_description, post_status, category_id_fk, hashtags, user_id } = req.body;
+    let { post_topic, post_description, hashtags, user_id } = req.body;
 
     // Validate required fields
     if (!post_id || !user_id) {
@@ -1725,7 +1725,6 @@ router.put('/post/edit/:post_id', async (req, res) => {
     // Sanitize inputs
     post_topic = post_topic?.trim() || null;
     post_description = post_description?.trim() || null;
-    post_status = (post_status?.toLowerCase() === 'friends') ? 'friends' : 'public';
 
     // Helper function for promisified queries
     const query = (sql, params) =>
@@ -1748,24 +1747,15 @@ router.put('/post/edit/:post_id', async (req, res) => {
       return res.status(403).json({ error: 'Unauthorized: You can only edit your own posts' });
     }
 
-    // 2. อัปเดตข้อมูลโพสต์หลัก
+    // 2. อัปเดตข้อมูลโพสต์หลัก (เฉพาะ topic และ description)
     const updatePostSql = `
       UPDATE post 
-      SET post_topic = ?, post_description = ?, post_status = ?
+      SET post_topic = ?, post_description = ?
       WHERE post_id = ?
     `;
-    await query(updatePostSql, [post_topic, post_description, post_status, post_id]);
+    await query(updatePostSql, [post_topic, post_description, post_id]);
 
-    // 3. อัปเดต categories (ลบของเก่า แล้วเพิ่มใหม่)
-    await query('DELETE FROM post_category WHERE post_id_fk = ?', [post_id]);
-    
-    if (Array.isArray(category_id_fk) && category_id_fk.length > 0) {
-      const categoryValues = category_id_fk.map(cid => [cid, post_id]);
-      const insertCategorySql = 'INSERT INTO post_category (category_id_fk, post_id_fk) VALUES ?';
-      await query(insertCategorySql, [categoryValues]);
-    }
-
-    // 4. อัปเดต hashtags (ลบของเก่า แล้วเพิ่มใหม่)
+    // 3. อัปเดต hashtags (ลบของเก่า แล้วเพิ่มใหม่)
     await query('DELETE FROM post_hashtags WHERE post_id_fk = ?', [post_id]);
     
     if (Array.isArray(hashtags) && hashtags.length > 0) {
@@ -1774,7 +1764,7 @@ router.put('/post/edit/:post_id', async (req, res) => {
       await query(insertHashtagSql, [hashtagValues]);
     }
 
-    // 5. ดึงข้อมูลโพสต์ที่อัปเดตแล้วพร้อม related data
+    // 4. ดึงข้อมูลโพสต์ที่อัปเดตแล้วพร้อม related data
     const postData = await query('SELECT * FROM post WHERE post_id = ?', [post_id]);
     
     const imageResults = await query(
