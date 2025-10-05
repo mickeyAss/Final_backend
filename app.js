@@ -1,6 +1,6 @@
 var express = require('express');
 var app = express();
-require('dotenv').config();
+
 const userRouter =  require('./api/user');
 const categoryRouter =  require('./api/category');
 const imagepostRouter =  require('./api/image_post');
@@ -20,5 +20,3 @@ app.use("/hashtags",hashtagsRouter);
 
 
 module.exports = app;
-// const PORT = process.env.PORT || 5050;
-// app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
