@@ -1,6 +1,10 @@
 var express = require('express');
 var router = express.Router();
 var conn = require('../dbconnect');
+const sgMail = require("@sendgrid/mail");
+
+
+
 
 const { google } = require('googleapis');
 const nodemailer = require('nodemailer');
@@ -711,6 +715,7 @@ router.put("/update-profile", (req, res) => {
 
 const resetTokens = {};
 
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 //เส้นทางการทำงานลืมรหัส
 router.post('/forgot-password', (req, res) => {
     const { email } = req.body;
