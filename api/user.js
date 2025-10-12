@@ -624,7 +624,7 @@ router.get('/notifications/:uid', (req, res) => {
 
 // 🔍 Search user by name (ทั้งบางส่วนและเต็ม)
 router.get("/search-user", (req, res) => {
-  const { name, uid } = req.query;  // 👈 ดึง uid มาด้วย
+  const { name, uid } = req.query;
 
   if (!name || name.trim() === "") {
     return res.status(400).json({ error: "Search query is required" });
@@ -638,7 +638,8 @@ router.get("/search-user", (req, res) => {
       SELECT uid, name, email, profile_image, personal_description
       FROM user
       WHERE (name LIKE ? OR name = ?)
-        AND uid != ?   -- 👈 กรองไม่เอาตัวเอง
+        AND uid != ?              -- ไม่เอาตัวเอง
+        AND type = 'user'         -- ✅ แสดงเฉพาะ type = 'user'
       ORDER BY name ASC
     `;
     const searchValue = `%${name}%`;
@@ -649,7 +650,7 @@ router.get("/search-user", (req, res) => {
         return res.status(500).json({ error: "Database query error" });
       }
 
-      // ส่ง [] แทน error เวลาไม่เจอ
+      // ส่ง [] กลับถ้าไม่เจอ
       return res.status(200).json(results);
     });
   } catch (err) {
@@ -657,6 +658,7 @@ router.get("/search-user", (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 });
+
 
 
 // อัปเดตข้อมูลผู้ใช้ (name, personal_description, profile_image)
