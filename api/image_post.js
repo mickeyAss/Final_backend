@@ -1695,7 +1695,7 @@ router.get("/admin/post-reports", (req, res) => {
   });
 });
 
-router.get("admin/user-reports", (req, res) => {
+router.get("/admin/user-reports", (req, res) => {
   const sql = `
     SELECT 
       ur.report_id,
@@ -1705,13 +1705,13 @@ router.get("admin/user-reports", (req, res) => {
       ur.created_at,
       reporter.name as reporter_name,
       reported.name as reported_name,
-      reported.is_banned  -- เพิ่มข้อมูลสถานะการแบน
+      COALESCE(reported.is_banned, 0) as is_banned  -- ✅ ถ้า NULL ให้เป็น 0
     FROM user_reports ur
     LEFT JOIN user reporter ON ur.reporter_id = reporter.uid
     LEFT JOIN user reported ON ur.reported_id = reported.uid
     ORDER BY ur.created_at DESC
   `;
-  
+    
   conn.query(sql, (err, results) => {
     if (err) {
       console.error("[User Reports] Error:", err);
