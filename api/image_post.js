@@ -1695,7 +1695,7 @@ router.get("/admin/post-reports", (req, res) => {
   });
 });
 
-router.get("/user-reports", (req, res) => {
+router.get("admin/user-reports", (req, res) => {
   const sql = `
     SELECT 
       ur.report_id,
@@ -1705,7 +1705,7 @@ router.get("/user-reports", (req, res) => {
       ur.created_at,
       reporter.name as reporter_name,
       reported.name as reported_name,
-      reported.is_banned  -- 👈 เพิ่มบรรทัดนี้
+      reported.is_banned  -- เพิ่มข้อมูลสถานะการแบน
     FROM user_reports ur
     LEFT JOIN user reporter ON ur.reporter_id = reporter.uid
     LEFT JOIN user reported ON ur.reported_id = reported.uid
