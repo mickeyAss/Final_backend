@@ -1703,9 +1703,9 @@ router.get("/admin/user-reports", (req, res) => {
       ur.reported_id,
       ur.reason,
       ur.created_at,
-      reporter.name as reporter_name,
-      reported.name as reported_name,
-      COALESCE(reported.is_banned, 0) as is_banned  -- ✅ ถ้า NULL ให้เป็น 0
+      COALESCE(reporter.name, 'Unknown') as reporter_name,
+      COALESCE(reported.name, 'Unknown') as reported_name,
+      COALESCE(reported.is_banned, 0) as is_banned  -- ✅ ป้องกัน NULL จาก LEFT JOIN
     FROM user_reports ur
     LEFT JOIN user reporter ON ur.reporter_id = reporter.uid
     LEFT JOIN user reported ON ur.reported_id = reported.uid
@@ -1717,7 +1717,15 @@ router.get("/admin/user-reports", (req, res) => {
       console.error("[User Reports] Error:", err);
       return res.status(500).json({ error: "Failed to fetch user reports" });
     }
-    res.json(results);
+    
+    // แปลง is_banned เป็น boolean ให้แน่ใจ
+    const processedResults = results.map(row => ({
+      ...row,
+      is_banned: row.is_banned === 1 || row.is_banned === true ? 1 : 0
+    }));
+    
+    console.log("✅ Processed Results:", processedResults);
+    res.json(processedResults);
   });
 });
 
