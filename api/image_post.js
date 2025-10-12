@@ -1426,6 +1426,142 @@ router.post('/delete-comment', (req, res) => {
   });
 });
 
+router.put('/edit-comment/:comment_id', (req, res) => {
+  const { comment_id } = req.params;
+  const { user_id, post_id, comment_text } = req.body;
+
+  // ตรวจสอบ parameter
+  if (!comment_id || !user_id || !post_id || !comment_text) {
+    console.log('[Edit Comment] Missing required fields');
+    return res.status(400).json({
+      error: 'comment_id, user_id, post_id, และ comment_text จำเป็น'
+    });
+  }
+
+  // ตรวจสอบความยาวของข้อความ
+  const trimmedText = comment_text.trim();
+  if (trimmedText.length === 0) {
+    return res.status(400).json({
+      error: 'ข้อความความคิดเห็นไม่สามารถว่างได้'
+    });
+  }
+
+  if (trimmedText.length > 1000) {
+    return res.status(400).json({
+      error: 'ข้อความความคิดเห็นต้องไม่เกิน 1000 ตัวอักษร'
+    });
+  }
+
+  // Step 1: ตรวจสอบว่าความคิดเห็นนี้เป็นของผู้ใช้หรือไม่
+  const checkCommentSql = `
+    SELECT 
+      pc.comment_id,
+      pc.user_id_fk AS comment_user_id,
+      pc.post_id_fk,
+      p.post_fk_uid AS post_user_id
+    FROM post_comments pc
+    JOIN post p ON pc.post_id_fk = p.post_id
+    WHERE pc.comment_id = ? AND pc.post_id_fk = ?
+  `;
+
+  conn.query(checkCommentSql, [comment_id, post_id], (err, results) => {
+    if (err) {
+      console.log('[Edit Comment] Query Error:', err);
+      return res.status(500).json({
+        error: 'เกิดข้อผิดพลาดในการตรวจสอบ'
+      });
+    }
+
+    // ไม่พบ comment
+    if (results.length === 0) {
+      console.log(
+        `[Edit Comment] Comment ${comment_id} not found in post ${post_id}`
+      );
+      return res.status(404).json({
+        error: 'ไม่พบความคิดเห็น'
+      });
+    }
+
+    const { comment_user_id, post_user_id } = results[0];
+
+    // Step 2: ตรวจสอบสิทธิ์
+    // ต้องเป็นเจ้าของความคิดเห็น หรือ เจ้าของโพสต์
+    const isCommentOwner = parseInt(user_id) === parseInt(comment_user_id);
+    const isPostOwner = parseInt(user_id) === parseInt(post_user_id);
+
+    if (!isCommentOwner && !isPostOwner) {
+      console.log(
+        `[Edit Comment] User ${user_id} ไม่มีสิทธิ์แก้ไข (Comment owner: ${comment_user_id}, Post owner: ${post_user_id})`
+      );
+      return res.status(403).json({
+        error: 'คุณไม่มีสิทธิ์แก้ไขความคิดเห็นนี้'
+      });
+    }
+
+    // Step 3: อัปเดตความคิดเห็น
+    const updateSql = `
+      UPDATE post_comments 
+      SET comment_text = ?, updated_at = NOW()
+      WHERE comment_id = ?
+    `;
+
+    conn.query(updateSql, [trimmedText, comment_id], (err, result) => {
+      if (err) {
+        console.log('[Edit Comment] Update Error:', err);
+        return res.status(500).json({
+          error: 'แก้ไขความคิดเห็นไม่สำเร็จ'
+        });
+      }
+
+      if (result.affectedRows === 0) {
+        console.log(`[Edit Comment] Failed to update comment ${comment_id}`);
+        return res.status(500).json({
+          error: 'แก้ไขความคิดเห็นไม่สำเร็จ'
+        });
+      }
+
+      // บันทึก log
+      const editedBy = isCommentOwner ? 'เจ้าของความคิดเห็น' : 'เจ้าของโพสต์';
+      console.log(
+        `[Edit Comment] Comment ${comment_id} edited by User ${user_id} (${editedBy})`
+      );
+
+      // ดึงข้อมูล comment ที่อัปเดตแล้ว
+      const getSql = `
+        SELECT 
+          pc.comment_id,
+          pc.comment_text,
+          pc.created_at,
+          pc.updated_at,
+          pc.user_id_fk AS uid,
+          u.name,
+          u.profile_image
+        FROM post_comments pc
+        JOIN user u ON pc.user_id_fk = u.uid
+        WHERE pc.comment_id = ?
+      `;
+
+      conn.query(getSql, [comment_id], (err, updatedResults) => {
+        if (err) {
+          console.log('[Edit Comment] Get updated comment Error:', err);
+          // ส่งอยู่แต่ไม่ใช่ error เพราะ update สำเร็จแล้ว
+          return res.status(200).json({
+            message: 'แก้ไขความคิดเห็นสำเร็จ',
+            editedCommentId: comment_id,
+            editedBy: editedBy
+          });
+        }
+
+        res.status(200).json({
+          message: 'แก้ไขความคิดเห็นสำเร็จ',
+          comment: updatedResults[0],
+          editedBy: editedBy
+        });
+      });
+    });
+  });
+});
+
 
 // --------------------------------------------
 // API GET /comments/:post_id
