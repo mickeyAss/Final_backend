@@ -712,6 +712,132 @@ router.put("/update-profile", (req, res) => {
   });
 });
 
+// ----------------- Ban User -----------------
+router.put("/ban-user", (req, res) => {
+  const { admin_uid, target_uid } = req.body;
+  console.log("[Ban User] Request body:", req.body);
+
+  if (!admin_uid || !target_uid) {
+    console.log("[Ban User] Missing admin_uid or target_uid");
+    return res.status(400).json({ error: "admin_uid และ target_uid จำเป็นต้องระบุ" });
+  }
+
+  // ตรวจสอบว่า admin_uid เป็นแอดมิน
+  const checkAdminSql = "SELECT type FROM user WHERE uid = ?";
+  conn.query(checkAdminSql, [admin_uid], (err, results) => {
+    if (err) {
+      console.log("[Ban User] Database error:", err);
+      return res.status(500).json({ error: "Database error" });
+    }
+
+    if (results.length === 0) {
+      console.log(`[Ban User] Admin UID ${admin_uid} not found`);
+      return res.status(403).json({ error: "คุณไม่มีสิทธิ์ทำรายการนี้" });
+    }
+
+    if (results[0].type !== "admin") {
+      console.log(`[Ban User] User UID ${admin_uid} is not admin`);
+      return res.status(403).json({ error: "คุณไม่มีสิทธิ์ทำรายการนี้" });
+    }
+
+    console.log(`[Ban User] Admin UID ${admin_uid} is verified`);
+
+    // อัปเดตสถานะผู้ใช้เป็นแบน
+    const banSql = "UPDATE user SET is_banned = 1, banned_at = NOW() WHERE uid = ?";
+    conn.query(banSql, [target_uid], (err2, result) => {
+      if (err2) {
+        console.log("[Ban User] Ban user failed:", err2);
+        return res.status(500).json({ error: "Ban user failed" });
+      }
+
+      if (result.affectedRows === 0) {
+        console.log(`[Ban User] Target UID ${target_uid} not found`);
+        return res.status(404).json({ error: "ไม่พบผู้ใช้" });
+      }
+
+      console.log(`[Ban User] User UID ${target_uid} banned successfully`);
+      return res.status(200).json({ message: "ผู้ใช้ถูกแบนเรียบร้อยแล้ว" });
+    });
+  });
+});
+
+// ----------------- Unban User -----------------
+router.put("/unban-user", (req, res) => {
+  const { admin_uid, target_uid } = req.body;
+  console.log("[Unban User] Request body:", req.body);
+
+  if (!admin_uid || !target_uid) {
+    console.log("[Unban User] Missing admin_uid or target_uid");
+    return res.status(400).json({ error: "admin_uid และ target_uid จำเป็นต้องระบุ" });
+  }
+
+  // ตรวจสอบว่า admin_uid เป็นแอดมิน
+  const checkAdminSql = "SELECT type FROM user WHERE uid = ?";
+  conn.query(checkAdminSql, [admin_uid], (err, results) => {
+    if (err) {
+      console.log("[Unban User] Database error:", err);
+      return res.status(500).json({ error: "Database error" });
+    }
+
+    if (results.length === 0) {
+      console.log(`[Unban User] Admin UID ${admin_uid} not found`);
+      return res.status(403).json({ error: "คุณไม่มีสิทธิ์ทำรายการนี้" });
+    }
+
+    if (results[0].type !== "admin") {
+      console.log(`[Unban User] User UID ${admin_uid} is not admin`);
+      return res.status(403).json({ error: "คุณไม่มีสิทธิ์ทำรายการนี้" });
+    }
+
+    console.log(`[Unban User] Admin UID ${admin_uid} is verified`);
+
+    // อัปเดตสถานะผู้ใช้เป็นไม่แบน
+    const unbanSql = "UPDATE user SET is_banned = 0, banned_at = NULL WHERE uid = ?";
+    conn.query(unbanSql, [target_uid], (err2, result) => {
+      if (err2) {
+        console.log("[Unban User] Unban user failed:", err2);
+        return res.status(500).json({ error: "Unban user failed" });
+      }
+
+      if (result.affectedRows === 0) {
+        console.log(`[Unban User] Target UID ${target_uid} not found`);
+        return res.status(404).json({ error: "ไม่พบผู้ใช้" });
+      }
+
+      console.log(`[Unban User] User UID ${target_uid} unbanned successfully`);
+      return res.status(200).json({ message: "ผู้ใช้ถูกปลดแบนเรียบร้อยแล้ว" });
+    });
+  });
+});
+
+router.get("/user-reports", (req, res) => {
+  const sql = `
+    SELECT 
+      ur.report_id,
+      ur.reporter_id,
+      ur.reported_id,
+      ur.reason,
+      ur.created_at,
+      reporter.name as reporter_name,
+      reported.name as reported_name,
+      reported.is_banned  -- เพิ่มข้อมูลสถานะการแบน
+    FROM user_reports ur
+    LEFT JOIN user reporter ON ur.reporter_id = reporter.uid
+    LEFT JOIN user reported ON ur.reported_id = reported.uid
+    ORDER BY ur.created_at DESC
+  `;
+  
+  conn.query(sql, (err, results) => {
+    if (err) {
+      console.error("[User Reports] Error:", err);
+      return res.status(500).json({ error: "Failed to fetch user reports" });
+    }
+    res.json(results);
+  });
+});
+
+
+
 
 // //ลืมรหัส by Pumitle
 // const resetTokens = {};
