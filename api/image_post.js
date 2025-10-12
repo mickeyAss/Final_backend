@@ -13,7 +13,7 @@ router.get("/get", (req, res) => {
   try {
     const targetUid = req.query.uid;
     const firstLoad = req.query.firstLoad === 'true';
-    
+
     if (!targetUid) {
       return res.status(400).json({ error: "Target uid is required" });
     }
@@ -29,7 +29,7 @@ router.get("/get", (req, res) => {
       // ปรับ SQL ให้รองรับการแสดงโพสต์ใหม่
       let postSql;
       let queryParams;
-      
+
       if (firstLoad) {
         // แสดงโพสต์ของตัวเองที่ใหม่ที่สุด + โพสต์คนอื่น
         postSql = `
@@ -1500,67 +1500,33 @@ router.put('/edit-comment/:comment_id', (req, res) => {
 
     // Step 3: อัปเดตความคิดเห็น
     const updateSql = `
-      UPDATE post_comments 
-      SET comment_text = ?, updated_at = NOW()
-      WHERE comment_id = ?
-    `;
+  UPDATE post_comments 
+  SET comment_text = ?
+  WHERE comment_id = ?
+`;
 
     conn.query(updateSql, [trimmedText, comment_id], (err, result) => {
       if (err) {
         console.log('[Edit Comment] Update Error:', err);
-        return res.status(500).json({
-          error: 'แก้ไขความคิดเห็นไม่สำเร็จ'
-        });
+        return res.status(500).json({ error: 'แก้ไขความคิดเห็นไม่สำเร็จ' });
       }
 
       if (result.affectedRows === 0) {
-        console.log(`[Edit Comment] Failed to update comment ${comment_id}`);
-        return res.status(500).json({
-          error: 'แก้ไขความคิดเห็นไม่สำเร็จ'
-        });
+        return res.status(500).json({ error: 'แก้ไขความคิดเห็นไม่สำเร็จ' });
       }
 
-      // บันทึก log
       const editedBy = isCommentOwner ? 'เจ้าของความคิดเห็น' : 'เจ้าของโพสต์';
-      console.log(
-        `[Edit Comment] Comment ${comment_id} edited by User ${user_id} (${editedBy})`
-      );
+      console.log(`[Edit Comment] Comment ${comment_id} edited by User ${user_id} (${editedBy})`);
 
-      // ดึงข้อมูล comment ที่อัปเดตแล้ว
-      const getSql = `
-        SELECT 
-          pc.comment_id,
-          pc.comment_text,
-          pc.created_at,
-          pc.updated_at,
-          pc.user_id_fk AS uid,
-          u.name,
-          u.profile_image
-        FROM post_comments pc
-        JOIN user u ON pc.user_id_fk = u.uid
-        WHERE pc.comment_id = ?
-      `;
-
-      conn.query(getSql, [comment_id], (err, updatedResults) => {
-        if (err) {
-          console.log('[Edit Comment] Get updated comment Error:', err);
-          // ส่งอยู่แต่ไม่ใช่ error เพราะ update สำเร็จแล้ว
-          return res.status(200).json({
-            message: 'แก้ไขความคิดเห็นสำเร็จ',
-            editedCommentId: comment_id,
-            editedBy: editedBy
-          });
-        }
-
-        res.status(200).json({
-          message: 'แก้ไขความคิดเห็นสำเร็จ',
-          comment: updatedResults[0],
-          editedBy: editedBy
-        });
+      res.status(200).json({
+        message: 'แก้ไขความคิดเห็นสำเร็จ',
+        editedCommentId: comment_id,
+        editedBy: editedBy
       });
     });
   });
 });
+
 
 
 // --------------------------------------------
@@ -1922,7 +1888,7 @@ router.put('/post/edit/:post_id', async (req, res) => {
 
     // 3. อัปเดต hashtags (ลบของเก่า แล้วเพิ่มใหม่)
     await query('DELETE FROM post_hashtags WHERE post_id_fk = ?', [post_id]);
-    
+
     if (Array.isArray(hashtags) && hashtags.length > 0) {
       const hashtagValues = hashtags.map(tagId => [post_id, tagId]);
       const insertHashtagSql = 'INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?';
@@ -1931,19 +1897,19 @@ router.put('/post/edit/:post_id', async (req, res) => {
 
     // 4. ดึงข้อมูลโพสต์ที่อัปเดตแล้วพร้อม related data
     const postData = await query('SELECT * FROM post WHERE post_id = ?', [post_id]);
-    
+
     const imageResults = await query(
-      'SELECT * FROM image_post WHERE image_fk_postid = ?', 
+      'SELECT * FROM image_post WHERE image_fk_postid = ?',
       [post_id]
     );
-    
+
     const categoryResults = await query(`
       SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
       FROM post_category pc
       JOIN category c ON pc.category_id_fk = c.cid
       WHERE pc.post_id_fk = ?
     `, [post_id]);
-    
+
     const hashtagResults = await query(`
       SELECT ph.post_id_fk, h.tag_id, h.tag_name
       FROM post_hashtags ph
@@ -1952,7 +1918,7 @@ router.put('/post/edit/:post_id', async (req, res) => {
     `, [post_id]);
 
     const analysisResults = await query(
-      'SELECT * FROM post_image_analysis WHERE post_id_fk = ?', 
+      'SELECT * FROM post_image_analysis WHERE post_id_fk = ?',
       [post_id]
     );
 
