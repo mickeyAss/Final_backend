@@ -1375,82 +1375,47 @@ router.post('/comment', (req, res) => {
 router.post('/delete-comment', (req, res) => {
   const { comment_id, user_id, post_id } = req.body;
 
-  // ตรวจสอบ parameter
   if (!comment_id || !user_id || !post_id) {
-    console.log('[Delete Comment] Missing required fields');
-    return res.status(400).json({
-      error: 'comment_id, user_id, และ post_id จำเป็น'
-    });
+    return res.status(400).json({ error: 'comment_id, user_id, และ post_id จำเป็น' });
   }
 
-  // Step 1: ตรวจสอบว่า comment อยู่ใน post เดียวกัน และดึงข้อมูลเจ้าของ
   const checkCommentSql = `
     SELECT 
       pc.comment_id,
       pc.user_id_fk AS comment_user_id,
       p.post_fk_uid AS post_user_id
     FROM post_comments pc
-    JOIN posts p ON pc.post_id_fk = p.post_id
+    JOIN post p ON pc.post_id_fk = p.post_id
     WHERE pc.comment_id = ? AND pc.post_id_fk = ?
   `;
 
   conn.query(checkCommentSql, [comment_id, post_id], (err, results) => {
     if (err) {
-      console.log('[Delete Comment] Query Error:', err);
-      return res.status(500).json({
-        error: 'เกิดข้อผิดพลาดในการตรวจสอบ'
-      });
+      console.log('[Delete Comment] SQL Error:', err);
+      return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการตรวจสอบ' });
     }
 
-    // ไม่พบ comment
     if (results.length === 0) {
-      console.log(
-        `[Delete Comment] Comment ${comment_id} not found in post ${post_id}`
-      );
-      return res.status(404).json({
-        error: 'Comment not found or not yours'
-      });
+      return res.status(404).json({ error: 'Comment not found or not yours' });
     }
 
     const { comment_user_id, post_user_id } = results[0];
-
-    // Step 2: ตรวจสอบสิทธิ์
-    // ผู้ลบต้องเป็นเจ้าของ comment หรือเจ้าของโพสต์
     const isCommentOwner = user_id.toString() === comment_user_id.toString();
     const isPostOwner = user_id.toString() === post_user_id.toString();
 
     if (!isCommentOwner && !isPostOwner) {
-      console.log(
-        `[Delete Comment] User ${user_id} ไม่มีสิทธิ์ลบ (Comment owner: ${comment_user_id}, Post owner: ${post_user_id})`
-      );
-      return res.status(403).json({
-        error: 'คุณไม่มีสิทธิ์ลบความคิดเห็นนี้'
-      });
+      return res.status(403).json({ error: 'คุณไม่มีสิทธิ์ลบความคิดเห็นนี้' });
     }
 
-    // Step 3: ลบ comment
     const deleteSql = 'DELETE FROM post_comments WHERE comment_id = ?';
-
     conn.query(deleteSql, [comment_id], (err, result) => {
-      if (err) {
+      if (err || result.affectedRows === 0) {
         console.log('[Delete Comment] Delete Error:', err);
-        return res.status(500).json({
-          error: 'ลบความคิดเห็นไม่สำเร็จ'
-        });
+        return res.status(500).json({ error: 'ลบความคิดเห็นไม่สำเร็จ' });
       }
 
-      if (result.affectedRows === 0) {
-        console.log(`[Delete Comment] Failed to delete comment ${comment_id}`);
-        return res.status(500).json({
-          error: 'ลบความคิดเห็นไม่สำเร็จ'
-        });
-      }
-
-      // บันทึก log
       const deletedBy = isCommentOwner ? 'เจ้าของความคิดเห็น' : 'เจ้าของโพสต์';
-      console.log(
-        `[Delete Comment] Comment ${comment_id} ลบสำเร็จโดย User ${user_id} (${deletedBy})`
-      );
+      console.log(`[Delete Comment] Comment ${comment_id} deleted by User ${user_id} (${deletedBy})`);
 
       return res.status(200).json({
         message: 'ลบความคิดเห็นสำเร็จ',
