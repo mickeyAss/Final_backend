@@ -1695,39 +1695,29 @@ router.get("/admin/post-reports", (req, res) => {
   });
 });
 
-router.get("/admin/user-reports", (req, res) => {
+router.get("/user-reports", (req, res) => {
   const sql = `
     SELECT 
       ur.report_id,
-      ur.reported_id,
-      reported_user.name AS reported_name,
       ur.reporter_id,
-      reporter_user.name AS reporter_name,
+      ur.reported_id,
       ur.reason,
-      ur.created_at
+      ur.created_at,
+      reporter.name as reporter_name,
+      reported.name as reported_name,
+      reported.is_banned  -- 👈 เพิ่มบรรทัดนี้
     FROM user_reports ur
-    LEFT JOIN user AS reported_user ON ur.reported_id = reported_user.uid
-    LEFT JOIN user AS reporter_user ON ur.reporter_id = reporter_user.uid
+    LEFT JOIN user reporter ON ur.reporter_id = reporter.uid
+    LEFT JOIN user reported ON ur.reported_id = reported.uid
     ORDER BY ur.created_at DESC
   `;
-
-  conn.query(sql, (err, rows) => {
+  
+  conn.query(sql, (err, results) => {
     if (err) {
-      console.error("Fetch User Reports Error:", err);
-      return res.status(500).json({ message: "เกิดข้อผิดพลาด" });
+      console.error("[User Reports] Error:", err);
+      return res.status(500).json({ error: "Failed to fetch user reports" });
     }
-
-    const userReports = rows.map(row => ({
-      reportId: row.report_id,
-      reportedId: row.reported_id,
-      reportedName: row.reported_name,
-      reporterId: row.reporter_id,
-      reporterName: row.reporter_name,
-      reason: row.reason,
-      createdAt: row.created_at,
-    }));
-
-    res.status(200).json(userReports);
+    res.json(results);
   });
 });
 
