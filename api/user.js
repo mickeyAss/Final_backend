@@ -848,40 +848,53 @@ function generateOTP() {
   return Math.floor(100000 + Math.random() * 900000);
 }
 
-// ✅ Route: ขอรหัส OTP
+// 📩 Route: ขอรหัส OTP
 router.post("/forgot-password", async (req, res) => {
   try {
     const { email } = req.body;
+
     if (!email) {
       return res.status(400).json({ message: "กรุณาระบุอีเมล" });
     }
 
+    // สร้าง OTP และวันหมดอายุ 10 นาที
     const verificationCode = generateOTP();
     const expires = new Date(Date.now() + 10 * 60 * 1000);
     resetTokens[verificationCode] = { email, expires };
 
-    if (!process.env.RESEND_API_KEY) {
-      return res.status(500).json({ message: "ไม่พบ RESEND_API_KEY ใน Environment" });
+    // ✅ ส่งอีเมลด้วย Resend
+    try {
+      const response = await resend.emails.send({
+        from: "ระบบรีเซ็ตรหัสผ่าน <onboarding@resend.dev>",
+        to: email,
+        subject: "รหัสยืนยันตัวตนสำหรับรีเซ็ตรหัสผ่าน (OTP)",
+        html: `
+          <div style="font-family: Arial, sans-serif; background-color: #f9f9fb; padding: 30px; text-align: center;">
+            <h2 style="color: #333;">🔐 รหัสยืนยันตัวตน</h2>
+            <p style="font-size: 18px;">กรุณาใช้รหัสนี้เพื่อรีเซ็ตรหัสผ่านของคุณ:</p>
+            <h1 style="font-size: 40px; color: #d32f2f;">${verificationCode}</h1>
+            <p style="color: #777;">รหัสนี้จะหมดอายุภายใน 10 นาที</p>
+          </div>
+        `,
+      });
+
+      console.log("ส่ง OTP สำเร็จ:", response);
+      return res.json({ message: "ส่งรหัสยืนยันตัวตนไปที่อีเมลเรียบร้อยแล้ว" });
+
+    } catch (emailErr) {
+      console.error("ส่งอีเมลล้มเหลว:", emailErr);
+      return res.status(500).json({
+        message: "ส่งอีเมลล้มเหลว",
+        error: emailErr.message,
+      });
     }
 
-    await resend.emails.send({
-      from: "ระบบรีเซ็ตรหัสผ่าน <no-reply@yourdomain.com>", // ตั้งชื่อผู้ส่งได้เอง
-      to: email,
-      subject: "รหัสยืนยันตัวตนสำหรับรีเซ็ตรหัสผ่าน (OTP)",
-      html: `
-        <div style="font-family: Arial, sans-serif; background-color: #f9f9fb; padding: 30px; text-align: center;">
-          <h2 style="color: #333;">🔐 รหัสยืนยันตัวตน</h2>
-          <p style="font-size: 18px;">กรุณาใช้รหัสนี้เพื่อรีเซ็ตรหัสผ่านของคุณ:</p>
-          <h1 style="font-size: 40px; color: #d32f2f;">${verificationCode}</h1>
-          <p style="color: #777;">รหัสนี้จะหมดอายุภายใน 10 นาที</p>
-        </div>
-      `,
-    });
-
-    res.json({ message: "ส่งรหัสยืนยันตัวตนไปที่อีเมลเรียบร้อยแล้ว" });
   } catch (err) {
-    console.error("ส่งอีเมลล้มเหลว:", err);
-    res.status(500).json({ message: "ไม่สามารถส่งอีเมลได้", error: err.message });
+    console.error("เกิดข้อผิดพลาดใน forgot-password:", err);
+    res.status(500).json({
+      message: "เกิดข้อผิดพลาดในเซิร์ฟเวอร์",
+      error: err.message,
+    });
   }
 });
 
