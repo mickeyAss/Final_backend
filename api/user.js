@@ -839,16 +839,15 @@ router.get("/user-reports", (req, res) => {
 
 
 
-//ลืมรหัส by Pumitle
-// เก็บรหัส OTP ชั่วคราวในหน่วยความจำ (ควรใช้ Redis แทนในโปรดักชัน)
+/// เก็บ OTP ชั่วคราว (สำหรับโปรดักชันควรใช้ Redis/DB)
 const resetTokens = {};
 
-// ✅ ฟังก์ชันสุ่มเลข OTP 6 หลัก
+// ฟังก์ชันสุ่มเลข OTP 6 หลัก
 function generateOTP() {
   return Math.floor(100000 + Math.random() * 900000);
 }
 
-// ✅ Route: ขอรหัสยืนยันรีเซ็ตรหัสผ่าน
+// Route: ขอรหัส OTP
 router.post("/forgot-password", async (req, res) => {
   try {
     const { email } = req.body;
@@ -857,24 +856,29 @@ router.post("/forgot-password", async (req, res) => {
       return res.status(400).json({ message: "กรุณาระบุอีเมล" });
     }
 
-    // สร้างรหัส OTP และวันหมดอายุ (10 นาที)
+    // สร้าง OTP และวันหมดอายุ 10 นาที
     const verificationCode = generateOTP();
     const expires = new Date(Date.now() + 10 * 60 * 1000);
 
     resetTokens[verificationCode] = { email, expires };
 
-    // ตั้งค่า nodemailer สำหรับ Gmail (ใช้รหัสผ่าน App Password เท่านั้น)
+    // ตรวจสอบ Environment Variable
+    if (!process.env.GMAIL_APP_PASS) {
+      console.error("GMAIL_APP_PASS ไม่ได้ตั้งค่าใน Environment");
+      return res.status(500).json({ message: "ไม่สามารถส่งอีเมลได้: ไม่พบ App Password" });
+    }
+
+    // ตั้งค่า nodemailer
     const transporter = nodemailer.createTransport({
       service: "gmail",
       auth: {
-        user: "sarawut.sutthipanyo@gmail.com",
-        pass: "vobi xukg ijoo qatm", // ✅ App Password (ไม่ใช่รหัส Gmail ปกติ)
+        user: process.env.GMAIL_USER || "sarawut.sutthipanyo@gmail.com",
+        pass: process.env.GMAIL_APP_PASS, // App Password จาก Environment
       },
     });
 
-    // HTML เนื้อหาอีเมล
     const mailOptions = {
-      from: '"ระบบรีเซ็ตรหัสผ่าน" <sarawut.sutthipanyo@gmail.com>',
+      from: `"ระบบรีเซ็ตรหัสผ่าน" <${process.env.GMAIL_USER || "sarawut.sutthipanyo@gmail.com"}>`,
       to: email,
       subject: "รหัสยืนยันตัวตนสำหรับรีเซ็ตรหัสผ่าน (OTP)",
       html: `
@@ -887,17 +891,27 @@ router.post("/forgot-password", async (req, res) => {
       `,
     };
 
-    // ส่งอีเมล
-    await transporter.sendMail(mailOptions);
+    // ส่งอีเมลพร้อม try/catch
+    try {
+      const info = await transporter.sendMail(mailOptions);
+      console.log("ส่ง OTP สำเร็จ:", info.response);
 
-    res.json({
-      message: "ส่งรหัสยืนยันตัวตนไปที่อีเมลเรียบร้อยแล้ว",
-    });
+      return res.json({
+        message: "ส่งรหัสยืนยันตัวตนไปที่อีเมลเรียบร้อยแล้ว",
+      });
+    } catch (emailErr) {
+      console.error("ส่งอีเมลล้มเหลว:", emailErr);
+      return res.status(500).json({
+        message: "ไม่สามารถส่งอีเมลได้",
+        error: emailErr.message,
+      });
+    }
   } catch (err) {
-    console.error("ส่งอีเมลล้มเหลว:", err);
-    res.status(500).json({ message: "ไม่สามารถส่งอีเมลได้" });
+    console.error("เกิดข้อผิดพลาดใน forgot-password:", err);
+    res.status(500).json({ message: "เกิดข้อผิดพลาดในเซิร์ฟเวอร์" });
   }
 });
+
 
 
 // //ตรวจสอบรหัสยืนยันตัวตน
