@@ -164,3 +164,23 @@ router.post("/insert", (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
+
+// ค้นหาหมวดหมู่จากชื่อ
+router.get('/search', (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q) return res.status(400).json({ error: 'กรุณาส่ง query q' });
+
+    const sql = 'SELECT * FROM category WHERE cname LIKE ?';
+    const searchTerm = `%${q}%`;
+    conn.query(sql, [searchTerm], (err, results) => {
+      if (err) {
+        console.error('Search query error:', err);
+        return res.status(500).json({ error: 'Database query error' });
+      }
+      res.json(results);
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
