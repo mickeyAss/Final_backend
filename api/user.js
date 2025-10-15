@@ -838,7 +838,57 @@ router.get("/user-reports", (req, res) => {
   });
 });
 
+router.post("/request-reset", (req, res) => {
+  const { email } = req.body;
 
+  const otp = Math.floor(100000 + Math.random() * 900000); // สุ่มเลข 6 หลัก
+  const expireTime = Date.now() + 5 * 60 * 1000; // หมดอายุใน 5 นาที
+
+  const sql = "UPDATE users SET otp = ?, otp_expire = ? WHERE email = ?";
+  conn.query(sql, [otp, expireTime, email], (err, result) => {
+    if (err) return res.status(500).json({ error: "Database error" });
+    if (result.affectedRows === 0)
+      return res.status(400).json({ message: "ไม่พบอีเมลนี้ในระบบ" });
+
+    // (สามารถต่อยอดให้ส่ง otp ทางอีเมลหรือ SMS ได้)
+    res.json({ message: "สร้างรหัสยืนยันเรียบร้อย", otp }); // สำหรับทดสอบโชว์ OTP
+  });
+});
+
+// ✅ 2. ตรวจสอบรหัส OTP
+router.post("/verify-otp", (req, res) => {
+  const { email, otp } = req.body;
+
+  const sql = "SELECT otp, otp_expire FROM users WHERE email = ?";
+  conn.query(sql, [email], (err, result) => {
+    if (err) return res.status(500).json({ error: "Database error" });
+    if (result.length === 0) return res.status(400).json({ message: "ไม่พบผู้ใช้" });
+
+    const { otp: dbOtp, otp_expire } = result[0];
+
+    if (Date.now() > otp_expire)
+      return res.status(400).json({ message: "รหัสยืนยันหมดอายุแล้ว" });
+
+    if (String(dbOtp) !== String(otp))
+      return res.status(400).json({ message: "รหัสยืนยันไม่ถูกต้อง" });
+
+    res.json({ message: "ยืนยันรหัสสำเร็จ" });
+  });
+});
+
+// ✅ 3. ตั้งรหัสผ่านใหม่
+router.post("/reset-password", (req, res) => {
+  const { email, newPassword } = req.body;
+
+  const sql = "UPDATE users SET password = ?, otp = NULL, otp_expire = NULL WHERE email = ?";
+  conn.query(sql, [newPassword, email], (err, result) => {
+    if (err) return res.status(500).json({ error: "Database error" });
+    if (result.affectedRows === 0)
+      return res.status(400).json({ message: "ไม่พบผู้ใช้" });
+
+    res.json({ message: "เปลี่ยนรหัสผ่านเรียบร้อยแล้ว" });
+  });
+});
 // เก็บ OTP ชั่วคราว
 // const resetTokens = {};
 
