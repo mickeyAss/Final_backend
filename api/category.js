@@ -25,37 +25,40 @@ router.get("/get", (req, res) => {
 
 router.get("/search-by-category", (req, res) => {
   try {
-    const categoryId = parseInt(req.query.category_id);
-    if (!categoryId) {
-      return res.status(400).json({ error: "กรุณาระบุ category_id" });
+    const cname = req.query.cname;
+    if (!cname || cname.trim() === "") {
+      return res.status(400).json({ error: "กรุณาระบุ cname" });
     }
 
-    // 1. ตรวจสอบว่าหมวดหมู่มีอยู่จริงไหม
-    const categorySql = "SELECT * FROM category WHERE cid = ?";
-    conn.query(categorySql, [categoryId], (err, categoryResults) => {
+    // 1. ตรวจสอบว่าหมวดหมู่มีอยู่จริงไหม (ค้นหาจากชื่อ)
+    const categorySql = "SELECT * FROM category WHERE cname LIKE ?";
+    conn.query(categorySql, [`%${cname}%`], (err, categoryResults) => {
       if (err) {
         console.error("Category query error:", err);
         return res.status(400).json({ error: "Category query error" });
       }
       if (categoryResults.length === 0) {
-        return res.status(404).json({ error: "ไม่พบหมวดหมู่นี้" });
+        return res.status(404).json({ error: "ไม่พบหมวดหมู่ที่ค้นหา" });
       }
 
-      // 2. ค้นหาโพสต์ที่อยู่ในหมวดหมู่นี้ ผ่านตาราง post_category
-      const postSql = `
-  SELECT 
-    p.post_id, p.post_topic, p.post_description, p.post_date, p.post_fk_uid,
-    u.uid, u.name, u.email, u.profile_image,
-    c.cid AS category_id, c.cname AS category_name, c.cimage, c.ctype, c.cdescription
-  FROM post p
-  JOIN post_category pc ON p.post_id = pc.post_id_fk
-  JOIN category c ON pc.category_id_fk = c.cid
-  JOIN user u ON p.post_fk_uid = u.uid
-  WHERE pc.category_id_fk = ?
-  ORDER BY p.post_date DESC
-`;
+      // ดึง cid ของหมวดหมู่ทั้งหมดที่ตรงชื่อ
+      const categoryIds = categoryResults.map((c) => c.cid);
 
-      conn.query(postSql, [categoryId], (err, posts) => {
+      // 2. ค้นหาโพสต์ทั้งหมดในหมวดหมู่เหล่านี้
+      const postSql = `
+        SELECT 
+          p.post_id, p.post_topic, p.post_description, p.post_date, p.post_fk_uid,
+          u.uid, u.name, u.email, u.profile_image,
+          c.cid AS category_id, c.cname AS category_name, c.cimage, c.ctype, c.cdescription
+        FROM post p
+        JOIN post_category pc ON p.post_id = pc.post_id_fk
+        JOIN category c ON pc.category_id_fk = c.cid
+        JOIN user u ON p.post_fk_uid = u.uid
+        WHERE pc.category_id_fk IN (?)
+        ORDER BY p.post_date DESC
+      `;
+
+      conn.query(postSql, [categoryIds], (err, posts) => {
         if (err) {
           console.error("Post query error:", err);
           return res.status(400).json({ error: "Post query error" });
@@ -67,9 +70,8 @@ router.get("/search-by-category", (req, res) => {
 
         // 3. ดึงรูปภาพของโพสต์ทั้งหมด
         const postIds = posts.map((p) => p.post_id);
-        const imageSql = `
-          SELECT * FROM image_post WHERE image_fk_postid IN (?)
-        `;
+        const imageSql = `SELECT * FROM image_post WHERE image_fk_postid IN (?)`;
+
         conn.query(imageSql, [postIds], (err, images) => {
           if (err) {
             console.error("Image query error:", err);
@@ -105,7 +107,8 @@ router.get("/search-by-category", (req, res) => {
           });
 
           res.status(200).json({
-            category: categoryResults[0],
+            search_name: cname,
+            matched_categories: categoryResults,
             total_posts: result.length,
             posts: result,
           });
@@ -117,4 +120,5 @@ router.get("/search-by-category", (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
+
 
