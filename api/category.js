@@ -189,7 +189,7 @@ router.get('/search', (req, res) => {
 router.put('/update/:cid', async (req, res) => {
     try {
         const { cid } = req.params;
-        const { cname, ctype, cdescription, image } = req.body;
+        const { cname, ctype, cdescription, cimage } = req.body;
 
         // สร้าง SQL แบบ dynamic เฉพาะฟิลด์ที่ส่งมา
         let fields = [];
@@ -207,9 +207,9 @@ router.put('/update/:cid', async (req, res) => {
             fields.push('cdescription = ?');
             values.push(cdescription);
         }
-        if (image !== undefined) {
+        if (cimage !== undefined) {
             fields.push('cimage = ?');
-            values.push(image);
+            values.push(cimage);
         }
 
         if (fields.length === 0) {
