@@ -184,3 +184,56 @@ router.get('/search', (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+
+// อัพเดตหมวดหมู่
+router.put('/update/:cid', async (req, res) => {
+    try {
+        const { cid } = req.params;
+        const { cname, ctype, cdescription, image } = req.body;
+
+        // สร้าง SQL แบบ dynamic เฉพาะฟิลด์ที่ส่งมา
+        let fields = [];
+        let values = [];
+
+        if (cname !== undefined) {
+            fields.push('cname = ?');
+            values.push(cname);
+        }
+        if (ctype !== undefined) {
+            fields.push('ctype = ?');
+            values.push(ctype);
+        }
+        if (cdescription !== undefined) {
+            fields.push('cdescription = ?');
+            values.push(cdescription);
+        }
+        if (image !== undefined) {
+            fields.push('cimage = ?');
+            values.push(image);
+        }
+
+        if (fields.length === 0) {
+            return res.status(400).json({ message: 'ไม่มีข้อมูลให้แก้ไข' });
+        }
+
+        values.push(cid); // สำหรับ WHERE
+
+        const sql = `UPDATE category SET ${fields.join(', ')} WHERE cid = ?`;
+
+        conn.query(sql, values, (err, result) => {
+            if (err) {
+                console.error(err);
+                return res.status(500).json({ message: 'เกิดข้อผิดพลาดในการอัพเดต' });
+            }
+
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ message: 'ไม่พบหมวดหมู่' });
+            }
+
+            return res.json({ message: 'อัพเดตสำเร็จ' });
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'เกิดข้อผิดพลาด' });
+    }
+});
