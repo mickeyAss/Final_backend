@@ -122,3 +122,45 @@ router.get("/search-by-category", (req, res) => {
 });
 
 
+// ✅ เส้น API สำหรับเพิ่ม category ใหม่
+router.post("/insert", (req, res) => {
+  try {
+    const { cname, cimage, ctype, cdescription } = req.body;
+
+    // ตรวจสอบว่าข้อมูลครบหรือไม่
+    if (!cname || !cimage || !ctype || !cdescription) {
+      return res.status(400).json({ error: "กรุณากรอกข้อมูลให้ครบทุกช่อง" });
+    }
+
+    // SQL สำหรับเพิ่มข้อมูล
+    const insertSql = `
+      INSERT INTO category (cname, cimage, ctype, cdescription)
+      VALUES (?, ?, ?, ?)
+    `;
+
+    conn.query(insertSql, [cname, cimage, ctype, cdescription], (err, result) => {
+      if (err) {
+        console.error("Insert category error:", err);
+        return res.status(400).json({ error: "ไม่สามารถเพิ่มหมวดหมู่ได้" });
+      }
+
+      // ดึงข้อมูล category ที่เพิ่งเพิ่ม
+      const newCategoryId = result.insertId;
+      const getSql = "SELECT * FROM category WHERE cid = ?";
+      conn.query(getSql, [newCategoryId], (err, rows) => {
+        if (err) {
+          console.error("Select new category error:", err);
+          return res.status(400).json({ error: "เพิ่มหมวดหมู่สำเร็จ แต่ไม่สามารถดึงข้อมูลกลับได้" });
+        }
+
+        res.status(201).json({
+          message: "เพิ่มหมวดหมู่สำเร็จ",
+          new_category: rows[0],
+        });
+      });
+    });
+  } catch (err) {
+    console.error("Server error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
