@@ -1256,9 +1256,9 @@ router.post('/comment', (req, res) => {
 
   // 1️⃣ Insert comment ลงฐานข้อมูล
   const insertSql = `
-    INSERT INTO post_comments (user_id_fk, post_id_fk, comment_text)
-    VALUES (?, ?, ?)
-  `;
+      INSERT INTO post_comments (user_id_fk, post_id_fk, comment_text)
+      VALUES (?, ?, ?)
+    `;
 
   conn.query(insertSql, [user_id, post_id, comment_text], (err, result) => {
     if (err) {
@@ -1297,9 +1297,9 @@ router.post('/comment', (req, res) => {
 
           // 🔹 Insert notification ลง MySQL
           const notifSql = `
-            INSERT INTO notifications (sender_uid, receiver_uid, post_id, type, message, is_read)
-            VALUES (?, ?, ?, 'comment', ?, 0)
-          `;
+              INSERT INTO notifications (sender_uid, receiver_uid, post_id, type, message, is_read)
+              VALUES (?, ?, ?, 'comment', ?, 0)
+            `;
 
           const notifValues = [user_id, receiver_uid, post_id, message];
           console.log('[Comment] Notification SQL:', notifSql);
@@ -1380,14 +1380,14 @@ router.post('/delete-comment', (req, res) => {
   }
 
   const checkCommentSql = `
-    SELECT 
-      pc.comment_id,
-      pc.user_id_fk AS comment_user_id,
-      p.post_fk_uid AS post_user_id
-    FROM post_comments pc
-    JOIN post p ON pc.post_id_fk = p.post_id
-    WHERE pc.comment_id = ? AND pc.post_id_fk = ?
-  `;
+      SELECT 
+        pc.comment_id,
+        pc.user_id_fk AS comment_user_id,
+        p.post_fk_uid AS post_user_id
+      FROM post_comments pc
+      JOIN post p ON pc.post_id_fk = p.post_id
+      WHERE pc.comment_id = ? AND pc.post_id_fk = ?
+    `;
 
   conn.query(checkCommentSql, [comment_id, post_id], (err, results) => {
     if (err) {
@@ -1454,15 +1454,15 @@ router.put('/edit-comment/:comment_id', (req, res) => {
 
   // Step 1: ตรวจสอบว่าความคิดเห็นนี้เป็นของผู้ใช้หรือไม่
   const checkCommentSql = `
-    SELECT 
-      pc.comment_id,
-      pc.user_id_fk AS comment_user_id,
-      pc.post_id_fk,
-      p.post_fk_uid AS post_user_id
-    FROM post_comments pc
-    JOIN post p ON pc.post_id_fk = p.post_id
-    WHERE pc.comment_id = ? AND pc.post_id_fk = ?
-  `;
+      SELECT 
+        pc.comment_id,
+        pc.user_id_fk AS comment_user_id,
+        pc.post_id_fk,
+        p.post_fk_uid AS post_user_id
+      FROM post_comments pc
+      JOIN post p ON pc.post_id_fk = p.post_id
+      WHERE pc.comment_id = ? AND pc.post_id_fk = ?
+    `;
 
   conn.query(checkCommentSql, [comment_id, post_id], (err, results) => {
     if (err) {
@@ -1500,10 +1500,10 @@ router.put('/edit-comment/:comment_id', (req, res) => {
 
     // Step 3: อัปเดตความคิดเห็น
     const updateSql = `
-  UPDATE post_comments 
-  SET comment_text = ?
-  WHERE comment_id = ?
-`;
+    UPDATE post_comments 
+    SET comment_text = ?
+    WHERE comment_id = ?
+  `;
 
     conn.query(updateSql, [trimmedText, comment_id], (err, result) => {
       if (err) {
@@ -1523,6 +1523,239 @@ router.put('/edit-comment/:comment_id', (req, res) => {
         editedCommentId: comment_id,
         editedBy: editedBy
       });
+    });
+  });
+});
+
+
+router.post("/like-comment", (req, res) => {
+  const { user_id, comment_id } = req.body;
+
+  if (!user_id || !comment_id) {
+    return res.status(400).json({ error: "user_id และ comment_id จำเป็น" });
+  }
+
+  // 1️⃣ ตรวจสอบว่าคอมเมนต์มีอยู่จริงไหม
+  const checkCommentSql = `
+    SELECT c.comment_id, c.user_id_fk AS comment_owner, p.post_id, p.post_fk_uid
+    FROM post_comments c
+    JOIN post p ON c.post_id_fk = p.post_id
+    WHERE c.comment_id = ?
+  `;
+
+  conn.query(checkCommentSql, [comment_id], (err, commentResult) => {
+    if (err) {
+      console.log("[Like Comment] Check comment error:", err);
+      return res.status(500).json({ error: "ตรวจสอบคอมเมนต์ไม่สำเร็จ" });
+    }
+
+    if (commentResult.length === 0) {
+      return res.status(404).json({ error: "ไม่พบคอมเมนต์นี้" });
+    }
+
+    const commentOwner = commentResult[0].comment_owner;
+    const postId = commentResult[0].post_id;
+
+    // 2️⃣ ตรวจสอบว่าผู้ใช้เคยไลก์แล้วหรือยัง
+    const checkLikeSql = `
+      SELECT * FROM comment_likes WHERE user_id_fk = ? AND comment_id_fk = ?
+    `;
+
+    conn.query(checkLikeSql, [user_id, comment_id], (err2, likeResult) => {
+      if (err2) {
+        console.log("[Like Comment] Check like error:", err2);
+        return res.status(500).json({ error: "ตรวจสอบการไลก์ไม่สำเร็จ" });
+      }
+
+      // 🔹 ถ้าเคยไลก์แล้ว → ยกเลิกไลก์
+      if (likeResult.length > 0) {
+        const deleteSql = `
+          DELETE FROM comment_likes WHERE user_id_fk = ? AND comment_id_fk = ?
+        `;
+        conn.query(deleteSql, [user_id, comment_id], (err3) => {
+          if (err3) {
+            console.log("[Like Comment] Unlike error:", err3);
+            return res.status(500).json({ error: "ยกเลิกไลก์ไม่สำเร็จ" });
+          }
+
+          // นับจำนวนไลก์ใหม่
+          const countSql = `SELECT COUNT(*) AS like_count FROM comment_likes WHERE comment_id_fk = ?`;
+          conn.query(countSql, [comment_id], (err4, countResult) => {
+            const likeCount = countResult ? countResult[0].like_count : 0;
+            return res.status(200).json({
+              message: "ยกเลิกไลก์สำเร็จ",
+              liked: false,
+              like_count: likeCount,
+            });
+          });
+        });
+      } else {
+        // 🔹 ถ้ายังไม่เคยไลก์ → เพิ่มไลก์ใหม่
+        const insertSql = `
+          INSERT INTO comment_likes (user_id_fk, comment_id_fk)
+          VALUES (?, ?)
+        `;
+        conn.query(insertSql, [user_id, comment_id], (err3, result3) => {
+          if (err3) {
+            console.log("[Like Comment] Insert like error:", err3);
+            return res.status(500).json({ error: "เพิ่มไลก์ไม่สำเร็จ" });
+          }
+
+          // ✅ ถ้าเจ้าของคอมเมนต์ไม่ใช่คนเดียวกับคนกดไลก์ → สร้าง Notification
+          if (commentOwner !== user_id) {
+            const message = "ได้กดถูกใจความคิดเห็นของคุณ";
+            const notifSql = `
+              INSERT INTO notifications (sender_uid, receiver_uid, post_id, type, message, is_read)
+              VALUES (?, ?, ?, 'comment_like', ?, 0)
+            `;
+            conn.query(notifSql, [user_id, commentOwner, postId, message], (err4) => {
+              if (err4) {
+                console.log("[Like Comment] Notification insert failed (MySQL):", err4);
+              }
+            });
+
+            // 🔹 เพิ่ม notification ใน Firebase Realtime Database
+            const notifData = {
+              sender_uid: user_id,
+              receiver_uid: commentOwner,
+              post_id: postId,
+              type: "comment_like",
+              message: message,
+              is_read: false,
+              created_at: admin.database.ServerValue.TIMESTAMP,
+            };
+
+            const db = admin.database();
+            const notifRef = db.ref("notifications").push();
+            notifRef
+              .set(notifData)
+              .then(() => console.log("[Like Comment] ✅ Firebase notification sent"))
+              .catch((firebaseErr) =>
+                console.log("[Like Comment] Firebase insert error:", firebaseErr)
+              );
+          }
+
+          // นับจำนวนไลก์ใหม่
+          const countSql = `SELECT COUNT(*) AS like_count FROM comment_likes WHERE comment_id_fk = ?`;
+          conn.query(countSql, [comment_id], (err5, countResult) => {
+            const likeCount = countResult ? countResult[0].like_count : 0;
+            return res.status(200).json({
+              message: "ไลก์ความคิดเห็นสำเร็จ",
+              liked: true,
+              like_count: likeCount,
+            });
+          });
+        });
+      }
+    });
+  });
+});
+
+// --------------------------------------------
+// API POST /unlike-comment
+// ยกเลิกไลก์คอมเมนต์
+// --------------------------------------------
+router.post("/unlike-comment", (req, res) => {
+  const { user_id, comment_id } = req.body;
+
+  if (!user_id || !comment_id) {
+    return res.status(400).json({ error: "user_id และ comment_id จำเป็น" });
+  }
+
+  const checkSql = `
+    SELECT * FROM comment_likes WHERE user_id_fk = ? AND comment_id_fk = ?
+  `;
+
+  conn.query(checkSql, [user_id, comment_id], (err, result) => {
+    if (err) {
+      console.log("[Unlike Comment] Check error:", err);
+      return res.status(500).json({ error: "ตรวจสอบข้อมูลไม่สำเร็จ" });
+    }
+
+    if (result.length === 0) {
+      return res.status(404).json({ error: "ยังไม่ได้กดถูกใจคอมเมนต์นี้" });
+    }
+
+    const deleteSql = `
+      DELETE FROM comment_likes WHERE user_id_fk = ? AND comment_id_fk = ?
+    `;
+
+    conn.query(deleteSql, [user_id, comment_id], (err2, result2) => {
+      if (err2) {
+        console.log("[Unlike Comment] Delete error:", err2);
+        return res.status(500).json({ error: "ยกเลิกไลก์ไม่สำเร็จ" });
+      }
+
+      // นับจำนวนไลก์ใหม่หลังจากยกเลิก
+      const countSql = `SELECT COUNT(*) AS like_count FROM comment_likes WHERE comment_id_fk = ?`;
+      conn.query(countSql, [comment_id], (err3, countResult) => {
+        if (err3) {
+          console.log("[Unlike Comment] Count error:", err3);
+          return res.status(500).json({ error: "นับจำนวนไลก์ไม่สำเร็จ" });
+        }
+
+        const likeCount = countResult[0].like_count;
+        res.status(200).json({
+          message: "ยกเลิกไลก์สำเร็จ",
+          liked: false,
+          like_count: likeCount,
+        });
+      });
+    });
+  });
+});
+
+// --------------------------------------------
+// API GET /is-comment-liked
+// ตรวจสอบว่าผู้ใช้เคยกดถูกใจคอมเมนต์นี้ไหม
+// --------------------------------------------
+router.get("/is-comment-liked", (req, res) => {
+  const { user_id, comment_id } = req.query;
+
+  if (!user_id || !comment_id) {
+    return res.status(400).json({ error: "กรุณาระบุ user_id และ comment_id" });
+  }
+
+  const sql = `
+    SELECT * FROM comment_likes WHERE user_id_fk = ? AND comment_id_fk = ?
+  `;
+
+  conn.query(sql, [user_id, comment_id], (err, result) => {
+    if (err) {
+      console.log("[Is Comment Liked] Error:", err);
+      return res.status(500).json({ error: "ตรวจสอบไม่สำเร็จ" });
+    }
+
+    res.status(200).json({
+      liked: result.length > 0,
+    });
+  });
+});
+
+// --------------------------------------------
+// API GET /comment-like-count/:comment_id
+// ดึงจำนวนไลก์ของคอมเมนต์
+// --------------------------------------------
+router.get("/comment-like-count/:comment_id", (req, res) => {
+  const { comment_id } = req.params;
+
+  if (!comment_id) {
+    return res.status(400).json({ error: "กรุณาระบุ comment_id" });
+  }
+
+  const countSql = `
+    SELECT COUNT(*) AS like_count FROM comment_likes WHERE comment_id_fk = ?
+  `;
+
+  conn.query(countSql, [comment_id], (err, result) => {
+    if (err) {
+      console.log("[Get Comment Like Count] Error:", err);
+      return res.status(500).json({ error: "เกิดข้อผิดพลาดในการดึงข้อมูล" });
+    }
+
+    res.status(200).json({
+      comment_id: comment_id,
+      like_count: result[0].like_count,
     });
   });
 });
@@ -1711,19 +1944,19 @@ router.get("/admin/user-reports", (req, res) => {
     LEFT JOIN user reported ON ur.reported_id = reported.uid
     ORDER BY ur.created_at DESC
   `;
-    
+
   conn.query(sql, (err, results) => {
     if (err) {
       console.error("[User Reports] Error:", err);
       return res.status(500).json({ error: "Failed to fetch user reports" });
     }
-    
+
     // แปลง is_banned เป็น boolean ให้แน่ใจ
     const processedResults = results.map(row => ({
       ...row,
       is_banned: row.is_banned === 1 || row.is_banned === true ? 1 : 0
     }));
-    
+
     console.log("✅ Processed Results:", processedResults);
     res.json(processedResults);
   });
