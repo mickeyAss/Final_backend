@@ -22,6 +22,26 @@ if (!admin.apps.length) {
 }
 
 
+
+router.delete('/delete/:uid', (req, res) => {
+  const uid = req.params.uid;
+
+  if (!uid) return res.status(400).json({ message: 'Missing user ID' });
+
+  const sql = 'DELETE FROM user WHERE uid = ?';
+  conn.query(sql, [uid], (err, result) => {
+    if (err) {
+      console.error('Error deleting user:', err); // log ให้เต็ม
+      return res.status(500).json({ message: err.message }); // แก้เพื่อดู error จริง
+    }
+
+    if (result.affectedRows === 0) return res.status(404).json({ message: 'User not found' });
+
+    res.status(200).json({ message: 'Account deleted successfully' });
+  });
+});
+
+
 /* ----------------------- API: ดึงข้อมูลผู้ใช้ ----------------------- */
 
 // ดึงผู้ใช้ทั้งหมดแบบสุ่ม
