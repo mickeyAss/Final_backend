@@ -2176,10 +2176,33 @@ router.put('/post/edit/:post_id', async (req, res) => {
   }
 });
 
+router.post("/searchByImageLabels", (req, res) => {
+  const { labels } = req.body;
+  if (!labels || labels.length === 0) {
+    return res.status(400).json({ error: "No labels provided" });
+  }
 
+  // สร้าง LIKE clause สำหรับ analysis_text
+  const likeClauses = labels.map(label => `a.analysis_text LIKE ?`).join(" OR ");
+  const sql = `
+    SELECT p.*, u.name, u.profile_image, a.image_url, a.analysis_text
+    FROM post_image_analysis a
+    JOIN post p ON a.post_id_fk = p.post_id
+    JOIN \`user\` u ON p.post_fk_uid = u.uid
+    WHERE ${likeClauses}
+    ORDER BY a.created_at DESC
+  `;
 
+  const values = labels.map(label => `%${label}%`);
 
-
+  conn.query(sql, values, (err, results) => {
+    if (err) {
+      console.error("Image label search error:", err);
+      return res.status(500).json({ error: "Database query error" });
+    }
+    res.json({ posts: results });
+  });
+});
 
 
 
