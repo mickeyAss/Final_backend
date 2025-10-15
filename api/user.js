@@ -839,57 +839,65 @@ router.get("/user-reports", (req, res) => {
 
 
 
-// //ลืมรหัส by Pumitle
-// const resetTokens = {};
+//ลืมรหัส by Pumitle
+// เก็บรหัส OTP ชั่วคราวในหน่วยความจำ (ควรใช้ Redis แทนในโปรดักชัน)
+const resetTokens = {};
 
+// ✅ ฟังก์ชันสุ่มเลข OTP 6 หลัก
+function generateOTP() {
+  return Math.floor(100000 + Math.random() * 900000);
+}
 
-// //เส้นทางการทำงานลืมรหัส
-// router.post('/forgot-password', (req, res) => {
-//     const { email } = req.body;
-    
-//     // สร้างเลขยืนยันตัวตน 6 หลัก
-//     const verificationCode = Math.floor(100000 + Math.random() * 900000); // สร้างเลข 6 หลัก
-    
-//     // เก็บเลขยืนยันตัวตนและวันหมดอายุในหน่วยความจำ
-//     const expires = new Date(Date.now() + 60000); // หมดอายุใน 1 ชั่วโมง
-//     resetTokens[verificationCode] = { email, expires };
-    
-//     // สร้างลิงก์สำหรับยืนยันตัวตน
-//         const resetLink = `app://reset-password?code=${verificationCode}`;
-    
+// ✅ Route: ขอรหัสยืนยันรีเซ็ตรหัสผ่าน
+router.post("/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
 
-//     // ตั้งค่าการส่งอีเมล
-//     const transporter = nodemailer.createTransport({
-//       service: 'gmail',
-//       auth: {
-//         user: 'sarawut.sutthipanyo@gmail.com',  // ใส่อีเมลตรงๆ
-//         pass: 'vobi xukg ijoo qatm'        // ใส่รหัสผ่านตรงๆ
-//       }
-//     });
-  
-//     const mailOptions = {
-//       from: 'sarawut.sutthipanyo@gmail.com',
-//       to: email,
-//       subject: 'รหัสยืนยันตัวตนสำหรับรีเซ็ตรหัสผ่าน',
-//       html: `
-//       <div style="display: flex; justify-content: flex-end; align-items: center; height: 100vh; font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; padding-right: 20px;">
-//         <div>
-//           <h1 style="font-size: 44px; color: #333; align-items: center;" >รหัสยืนยันตัวตน</h1>
-//           <p style="font-size: 36px; color:rgb(164, 6, 6); font-weight: bold;">${verificationCode}</p>
-//           <p style="font-size: 18px; color: #555;">กรุณาใช้รหัสนี้เพื่อรีเซ็ตรหัสผ่านของคุณ</p>
-//         </div>
-//       </div>`
-//     };
-  
-//     // ส่งอีเมล
-//     transporter.sendMail(mailOptions, (err, info) => {
-//         if (err) {
-//           console.error('Error:', err);  // แสดงรายละเอียดข้อผิดพลาด
-//           return res.status(500).json({ message: 'ส่งอีเมลไม่สำเร็จ' });
-//         }
-//         res.json({ message: 'ส่งรหัสยืนยันตัวตนแล้ว' });
-//     });
-// });
+    if (!email) {
+      return res.status(400).json({ message: "กรุณาระบุอีเมล" });
+    }
+
+    // สร้างรหัส OTP และวันหมดอายุ (10 นาที)
+    const verificationCode = generateOTP();
+    const expires = new Date(Date.now() + 10 * 60 * 1000);
+
+    resetTokens[verificationCode] = { email, expires };
+
+    // ตั้งค่า nodemailer สำหรับ Gmail (ใช้รหัสผ่าน App Password เท่านั้น)
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: "sarawut.sutthipanyo@gmail.com",
+        pass: "vobi xukg ijoo qatm", // ✅ App Password (ไม่ใช่รหัส Gmail ปกติ)
+      },
+    });
+
+    // HTML เนื้อหาอีเมล
+    const mailOptions = {
+      from: '"ระบบรีเซ็ตรหัสผ่าน" <sarawut.sutthipanyo@gmail.com>',
+      to: email,
+      subject: "รหัสยืนยันตัวตนสำหรับรีเซ็ตรหัสผ่าน (OTP)",
+      html: `
+        <div style="font-family: Arial, sans-serif; background-color: #f9f9fb; padding: 30px; text-align: center;">
+          <h2 style="color: #333;">🔐 รหัสยืนยันตัวตน</h2>
+          <p style="font-size: 18px;">กรุณาใช้รหัสนี้เพื่อรีเซ็ตรหัสผ่านของคุณ:</p>
+          <h1 style="font-size: 40px; color: #d32f2f;">${verificationCode}</h1>
+          <p style="color: #777;">รหัสนี้จะหมดอายุภายใน 10 นาที</p>
+        </div>
+      `,
+    };
+
+    // ส่งอีเมล
+    await transporter.sendMail(mailOptions);
+
+    res.json({
+      message: "ส่งรหัสยืนยันตัวตนไปที่อีเมลเรียบร้อยแล้ว",
+    });
+  } catch (err) {
+    console.error("ส่งอีเมลล้มเหลว:", err);
+    res.status(500).json({ message: "ไม่สามารถส่งอีเมลได้" });
+  }
+});
 
 
 // //ตรวจสอบรหัสยืนยันตัวตน
