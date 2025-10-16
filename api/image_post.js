@@ -12,13 +12,12 @@ module.exports = router;
 router.get("/get", (req, res) => {
   try {
     const targetUid = req.query.uid;
-    const firstLoad = req.query.firstLoad === 'true';
 
     if (!targetUid) {
       return res.status(400).json({ error: "Target uid is required" });
     }
 
-    // ดึง target user
+    // ดึงข้อมูล user เป้าหมาย
     const userSql = `SELECT * FROM user WHERE uid = ?`;
     conn.query(userSql, [targetUid], (err, targetResults) => {
       if (err) return res.status(400).json({ error: 'Target user query error' });
@@ -26,50 +25,24 @@ router.get("/get", (req, res) => {
 
       const targetUser = targetResults[0];
 
-      // ปรับ SQL ให้รองรับการแสดงโพสต์ใหม่
-      let postSql;
-      let queryParams;
+      // ดึงโพสต์ทั้งหมด
+      const postSql = `
+        SELECT 
+          post.*, 
+          user.uid, user.name, user.email, 
+          user.personal_description, user.profile_image,
+          user.height, user.weight, user.shirt_size, 
+          user.chest, user.waist_circumference, user.hip,
+          CASE WHEN user.uid = ? THEN 1 ELSE 0 END as is_own_post
+        FROM post
+        JOIN user ON post.post_fk_uid = user.uid
+      `;
 
-      if (firstLoad) {
-        // แสดงโพสต์ของตัวเองที่ใหม่ที่สุด + โพสต์คนอื่น
-        postSql = `
-          SELECT 
-            post.*, 
-            user.uid, user.name, user.email, 
-            user.personal_description, user.profile_image,
-            user.height, user.weight, user.shirt_size, 
-            user.chest, user.waist_circumference, user.hip,
-            CASE 
-              WHEN user.uid = ? THEN 1 
-              ELSE 0 
-            END as is_own_post
-          FROM post
-          JOIN user ON post.post_fk_uid = user.uid
-          ORDER BY is_own_post DESC, post.post_date DESC
-        `;
-        queryParams = [targetUid];
-      } else {
-        // โหลดปกติ (ไม่เอาโพสต์ตัวเอง)
-        postSql = `
-          SELECT 
-            post.*, 
-            user.uid, user.name, user.email, 
-            user.personal_description, user.profile_image,
-            user.height, user.weight, user.shirt_size, 
-            user.chest, user.waist_circumference, user.hip,
-            0 as is_own_post
-          FROM post
-          JOIN user ON post.post_fk_uid = user.uid
-          WHERE user.uid != ?
-          ORDER BY post.post_date DESC
-        `;
-        queryParams = [targetUid];
-      }
-
-      conn.query(postSql, queryParams, (err, postResults) => {
+      conn.query(postSql, [targetUid], (err, postResults) => {
         if (err) return res.status(400).json({ error: 'Post query error' });
         if (postResults.length === 0) return res.status(404).json({ error: 'No posts found' });
 
+        // ดึง images, categories, hashtags, likes
         const imageSql = `SELECT * FROM image_post`;
         conn.query(imageSql, (err, imageResults) => {
           if (err) return res.status(400).json({ error: 'Image query error' });
@@ -99,16 +72,12 @@ router.get("/get", (req, res) => {
                 if (err) return res.status(400).json({ error: 'Like count query error' });
 
                 const likeMap = {};
-                likeResults.forEach(item => {
-                  likeMap[item.post_id] = item.like_count;
-                });
+                likeResults.forEach(item => { likeMap[item.post_id] = item.like_count; });
 
                 const sizeMap = { XS: 1, S: 2, M: 3, L: 4, XL: 5, XXL: 6 };
-
                 function calcDistance(u1, u2) {
                   const shirt1 = sizeMap[u1.shirt_size] || 0;
                   const shirt2 = sizeMap[u2.shirt_size] || 0;
-
                   return Math.sqrt(
                     Math.pow((u1.height || 0) - (u2.height || 0), 2) +
                     Math.pow((u1.weight || 0) - (u2.weight || 0), 2) +
@@ -119,23 +88,13 @@ router.get("/get", (req, res) => {
                   );
                 }
 
+                // เตรียม postsWithData
                 const postsWithData = postResults.map(post => {
                   const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
-                  const categories = categoryResults
-                    .filter(cat => cat.post_id_fk === post.post_id)
-                    .map(cat => ({
-                      cid: cat.cid,
-                      cname: cat.cname,
-                      cimage: cat.cimage,
-                      ctype: cat.ctype
-                    }));
-
-                  const hashtags = hashtagResults
-                    .filter(ht => ht.post_id_fk === post.post_id)
-                    .map(ht => ({
-                      tag_id: ht.tag_id,
-                      tag_name: ht.tag_name
-                    }));
+                  const categories = categoryResults.filter(cat => cat.post_id_fk === post.post_id)
+                    .map(cat => ({ cid: cat.cid, cname: cat.cname, cimage: cat.cimage, ctype: cat.ctype }));
+                  const hashtags = hashtagResults.filter(ht => ht.post_id_fk === post.post_id)
+                    .map(ht => ({ tag_id: ht.tag_id, tag_name: ht.tag_name }));
 
                   return {
                     post: {
@@ -166,26 +125,27 @@ router.get("/get", (req, res) => {
                     images,
                     categories,
                     hashtags,
-                    similarity_distance: post.is_own_post ? -1 : calcDistance(post, targetUser), // โพสต์ตัวเองให้ distance เป็น -1
+                    similarity_distance: post.is_own_post ? -1 : calcDistance(post, targetUser),
                     is_own_post: post.is_own_post
                   };
                 });
 
-                if (firstLoad) {
-                  // จัดเรียงให้โพสต์ตัวเองขึ้นก่อน แล้วค่อยเรียงตามความคล้าย
-                  postsWithData.sort((a, b) => {
-                    if (a.is_own_post && !b.is_own_post) return -1;
-                    if (!a.is_own_post && b.is_own_post) return 1;
-                    if (a.is_own_post && b.is_own_post) {
-                      // ถ้าเป็นโพสต์ตัวเองทั้งคู่ ให้เรียงตามวันที่ (ใหม่ก่อน)
-                      return new Date(b.post.post_date) - new Date(a.post.post_date);
+                // เรียงตามเวลาโพสต์ล่าสุดก่อน
+                postsWithData.sort((a, b) => new Date(b.post.post_date) - new Date(a.post.post_date));
+
+                // ปรับความใกล้เคียง (optional): ถ้าโพสต์ตัวเองและโพสต์อื่นเวลาใกล้กัน ≤ 1 วัน สามารถสลับตาม similarity
+                const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+                for (let i = 0; i < postsWithData.length - 1; i++) {
+                  const current = postsWithData[i];
+                  const next = postsWithData[i + 1];
+                  const timeDiff = Math.abs(new Date(current.post.post_date) - new Date(next.post.post_date));
+
+                  if (!current.is_own_post && next.is_own_post && timeDiff <= ONE_DAY_MS) {
+                    if (current.similarity_distance > next.similarity_distance) {
+                      postsWithData[i] = next;
+                      postsWithData[i + 1] = current;
                     }
-                    // ถ้าไม่ใช่โพสต์ตัวเอง ให้เรียงตามความคล้าย
-                    return a.similarity_distance - b.similarity_distance;
-                  });
-                } else {
-                  // เรียงตามความคล้ายคลึงปกติ
-                  postsWithData.sort((a, b) => a.similarity_distance - b.similarity_distance);
+                  }
                 }
 
                 res.status(200).json(postsWithData);
@@ -196,10 +156,12 @@ router.get("/get", (req, res) => {
       });
     });
   } catch (err) {
-    console.log(err);
-    return res.status(500).json({ error: 'Server error' });
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
   }
 });
+
+
 
 const admin = require('firebase-admin');
 // ต้องตั้งค่า Firebase Admin SDK ก่อน (โหลด service account json)
