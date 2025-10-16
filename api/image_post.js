@@ -2022,23 +2022,20 @@ router.post("/report-user", (req, res) => {
 
 // --------------------------------------------
 // API PUT /post/edit/:post_id
-// แก้ไขโพสต์ (เฉพาะ topic, description และ hashtags)
+// แก้ไขโพสต์ (topic, description, category, hashtags)
 // --------------------------------------------
 router.put('/post/edit/:post_id', async (req, res) => {
   try {
     const { post_id } = req.params;
-    let { post_topic, post_description, hashtags, user_id } = req.body;
+    let { user_id, post_topic, post_description, hashtags, categories } = req.body;
 
-    // Validate required fields
     if (!post_id || !user_id) {
       return res.status(400).json({ error: 'Missing post_id or user_id' });
     }
 
-    // Sanitize inputs
     post_topic = post_topic?.trim() || null;
     post_description = post_description?.trim() || null;
 
-    // Helper function for promisified queries
     const query = (sql, params) =>
       new Promise((resolve, reject) => {
         conn.query(sql, params, (err, result) => {
@@ -2047,77 +2044,75 @@ router.put('/post/edit/:post_id', async (req, res) => {
         });
       });
 
-    // 1. ตรวจสอบว่าโพสต์นี้เป็นของ user หรือไม่
-    const checkOwnerSql = 'SELECT post_fk_uid FROM post WHERE post_id = ?';
-    const ownerResult = await query(checkOwnerSql, [post_id]);
-
-    if (ownerResult.length === 0) {
+    // ✅ 1. ตรวจสอบเจ้าของโพสต์
+    const ownerResult = await query('SELECT post_fk_uid FROM post WHERE post_id = ?', [post_id]);
+    if (ownerResult.length === 0)
       return res.status(404).json({ error: 'Post not found' });
-    }
 
-    if (ownerResult[0].post_fk_uid !== user_id) {
+    if (ownerResult[0].post_fk_uid !== user_id)
       return res.status(403).json({ error: 'Unauthorized: You can only edit your own posts' });
-    }
 
-    // 2. อัปเดตข้อมูลโพสต์หลัก (เฉพาะ topic และ description)
-    const updatePostSql = `
-      UPDATE post 
-      SET post_topic = ?, post_description = ?
-      WHERE post_id = ?
-    `;
-    await query(updatePostSql, [post_topic, post_description, post_id]);
-
-    // 3. อัปเดต hashtags (ลบของเก่า แล้วเพิ่มใหม่)
-    await query('DELETE FROM post_hashtags WHERE post_id_fk = ?', [post_id]);
-
-    if (Array.isArray(hashtags) && hashtags.length > 0) {
-      const hashtagValues = hashtags.map(tagId => [post_id, tagId]);
-      const insertHashtagSql = 'INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?';
-      await query(insertHashtagSql, [hashtagValues]);
-    }
-
-    // 4. ดึงข้อมูลโพสต์ที่อัปเดตแล้วพร้อม related data
-    const postData = await query('SELECT * FROM post WHERE post_id = ?', [post_id]);
-
-    const imageResults = await query(
-      'SELECT * FROM image_post WHERE image_fk_postid = ?',
-      [post_id]
+    // ✅ 2. อัปเดต topic/description
+    await query(
+      `UPDATE post SET post_topic = ?, post_description = ? WHERE post_id = ?`,
+      [post_topic, post_description, post_id]
     );
 
+    // ✅ 3. อัปเดต category
+    await query('DELETE FROM post_category WHERE post_id_fk = ?', [post_id]);
+    if (Array.isArray(categories) && categories.length > 0) {
+      const categoryValues = categories.map(cid => [post_id, cid]);
+      await query('INSERT INTO post_category (post_id_fk, category_id_fk) VALUES ?', [categoryValues]);
+    }
+
+    // ✅ 4. อัปเดต hashtags (รองรับเพิ่มใหม่)
+    await query('DELETE FROM post_hashtags WHERE post_id_fk = ?', [post_id]);
+    if (Array.isArray(hashtags) && hashtags.length > 0) {
+      const hashtagIds = [];
+
+      for (const tag of hashtags) {
+        // ถ้าเป็นตัวเลข → ใช้ได้เลย
+        if (typeof tag === 'number') {
+          hashtagIds.push(tag);
+          continue;
+        }
+
+        // ถ้าเป็น string → ตรวจว่ามีอยู่ไหม
+        const existing = await query('SELECT tag_id FROM hashtags WHERE tag_name = ?', [tag.trim()]);
+        if (existing.length > 0) {
+          hashtagIds.push(existing[0].tag_id);
+        } else {
+          const insertResult = await query('INSERT INTO hashtags (tag_name) VALUES (?)', [tag.trim()]);
+          hashtagIds.push(insertResult.insertId);
+        }
+      }
+
+      const hashtagValues = hashtagIds.map(tagId => [post_id, tagId]);
+      await query('INSERT INTO post_hashtags (post_id_fk, hashtag_id_fk) VALUES ?', [hashtagValues]);
+    }
+
+    // ✅ 5. ดึงข้อมูลโพสต์ที่อัปเดตแล้ว
+    const postData = await query('SELECT * FROM post WHERE post_id = ?', [post_id]);
+    const imageResults = await query('SELECT * FROM image_post WHERE image_fk_postid = ?', [post_id]);
     const categoryResults = await query(`
-      SELECT pc.post_id_fk, c.cid, c.cname, c.cimage, c.ctype
+      SELECT c.cid, c.cname, c.cimage, c.ctype
       FROM post_category pc
       JOIN category c ON pc.category_id_fk = c.cid
       WHERE pc.post_id_fk = ?
     `, [post_id]);
-
     const hashtagResults = await query(`
-      SELECT ph.post_id_fk, h.tag_id, h.tag_name
+      SELECT h.tag_id, h.tag_name
       FROM post_hashtags ph
       JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
       WHERE ph.post_id_fk = ?
     `, [post_id]);
 
-    const analysisResults = await query(
-      'SELECT * FROM post_image_analysis WHERE post_id_fk = ?',
-      [post_id]
-    );
-
     res.status(200).json({
-      message: 'Post updated successfully',
+      message: 'Post updated successfully (with hashtag creation)',
       post: postData[0],
       images: imageResults,
-      categories: categoryResults.map(cat => ({
-        cid: cat.cid,
-        cname: cat.cname,
-        cimage: cat.cimage,
-        ctype: cat.ctype
-      })),
-      hashtags: hashtagResults.map(ht => ({
-        tag_id: ht.tag_id,
-        tag_name: ht.tag_name
-      })),
-      analysis: analysisResults
+      categories: categoryResults,
+      hashtags: hashtagResults
     });
 
   } catch (error) {
@@ -2125,51 +2120,3 @@ router.put('/post/edit/:post_id', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
-router.post("/searchByImageLabels", (req, res) => {
-  const { labels } = req.body;
-  if (!labels || labels.length === 0) {
-    return res.status(400).json({ error: "No labels provided" });
-  }
-
-  // สร้าง LIKE clause สำหรับ analysis_text
-  const likeClauses = labels.map(label => `a.analysis_text LIKE ?`).join(" OR ");
-  const sql = `
-    SELECT p.*, u.name, u.profile_image, a.image_url, a.analysis_text
-    FROM post_image_analysis a
-    JOIN post p ON a.post_id_fk = p.post_id
-    JOIN \`user\` u ON p.post_fk_uid = u.uid
-    WHERE ${likeClauses}
-    ORDER BY a.created_at DESC
-  `;
-
-  const values = labels.map(label => `%${label}%`);
-
-  conn.query(sql, values, (err, results) => {
-    if (err) {
-      console.error("Image label search error:", err);
-      return res.status(500).json({ error: "Database query error" });
-    }
-    res.json({ posts: results });
-  });
-});
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
