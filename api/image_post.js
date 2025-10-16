@@ -1963,47 +1963,29 @@ router.get("/admin/user-reports", (req, res) => {
 });
 
 
-
-
 router.delete("/delete-post/:post_id", async (req, res) => {
   const { post_id } = req.params;
 
-  // ตารางลูกทั้งหมดที่เกี่ยวข้องกับ post
-  const tables = [
-    { name: "image_post", key: "image_fk_postid" },
-    { name: "reports", key: "post_id" },
-    { name: "post_hashtags", key: "post_id_fk" },
-    { name: "post_category", key: "post_id_fk" },
-    { name: "post_likes", key: "post_id_fk" },
-    { name: "post_saves", key: "post_id_fk" },
-    { name: "post_comments", key: "post_id_fk" },
-    { name: "notifications", key: "post_id" },
-    { name: "post_image_analysis", key: "post_id_fk" } // <-- เพิ่มตารางนี้
-  ];
-
-  const query = (sql, params) =>
-    new Promise((resolve, reject) => {
-      conn.query(sql, params, (err, result) => {
-        if (err) reject(err);
-        else resolve(result);
-      });
-    });
-
   try {
-    // ลบข้อมูลจากตารางลูกทั้งหมดก่อน
-    for (const table of tables) {
-      await query(`DELETE FROM ${table.name} WHERE ${table.key} = ?`, [post_id]);
-    }
+    const sql = "DELETE FROM post WHERE post_id = ?";
+    conn.query(sql, [post_id], (err, result) => {
+      if (err) {
+        console.error("Delete Post Error:", err);
+        return res.status(500).json({ message: "เกิดข้อผิดพลาดในการลบโพสต์" });
+      }
 
-    // ลบโพสต์หลัก
-    await query("DELETE FROM post WHERE post_id = ?", [post_id]);
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ message: "ไม่พบโพสต์ที่ต้องการลบ" });
+      }
 
-    res.status(200).json({ message: "ลบโพสต์และข้อมูลที่เกี่ยวข้องทั้งหมดสำเร็จ" });
+      res.status(200).json({ message: "ลบโพสต์และข้อมูลที่เกี่ยวข้องสำเร็จ (ON DELETE CASCADE)" });
+    });
   } catch (err) {
     console.error("Delete Post Error:", err);
     res.status(500).json({ message: "เกิดข้อผิดพลาดในการลบโพสต์" });
   }
 });
+
 
 router.post("/report-user", (req, res) => {
   const { reporter_id, reported_id, reason } = req.body;
