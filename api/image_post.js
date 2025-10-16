@@ -4,10 +4,10 @@ var conn = require('../dbconnect')
 
 
 module.exports = router;
-
 // --------------------------------------------
 // API GET /get
 // ดึงโพสต์ทั้งหมด พร้อมข้อมูลผู้ใช้ รูปภาพ หมวดหมู่ แฮชแท็ก และจำนวนไลก์
+// เรียง feed: โพสต์คนอื่นใกล้เคียงสลับกับโพสต์ล่าสุด
 // --------------------------------------------
 router.get("/get", (req, res) => {
   try {
@@ -129,19 +129,31 @@ router.get("/get", (req, res) => {
                   };
                 });
 
-                // แยกโพสต์
-                const ownPosts = postsWithData.filter(p => p.is_own_post)
-                                              .sort((a, b) => new Date(b.post.post_date) - new Date(a.post.post_date));
+                // -----------------------------------
+                // แยกโพสต์คนอื่น
+                // -----------------------------------
+                const otherPostsClose = postsWithData
+                  .filter(p => !p.is_own_post && p.similarity_distance <= 10)
+                  .sort((a, b) => a.similarity_distance - b.similarity_distance);
 
-                const otherPostsClose = postsWithData.filter(p => !p.is_own_post && p.similarity_distance <= 10) // เลือก threshold ใกล้เคียง
-                                                     .sort((a, b) => a.similarity_distance - b.similarity_distance);
+                const otherPostsFar = postsWithData
+                  .filter(p => !p.is_own_post && p.similarity_distance > 10)
+                  .sort((a, b) => new Date(b.post.post_date) - new Date(a.post.post_date));
 
-                const otherPostsFar = postsWithData.filter(p => !p.is_own_post && p.similarity_distance > 10)
-                                                   .sort((a, b) => new Date(b.post.post_date) - new Date(a.post.post_date));
+                // สลับโพสต์ใกล้เคียงกับโพสต์ล่าสุด
+                function interleavePosts(arr1, arr2) {
+                  const result = [];
+                  const maxLength = Math.max(arr1.length, arr2.length);
+                  for (let i = 0; i < maxLength; i++) {
+                    if (i < arr1.length) result.push(arr1[i]);
+                    if (i < arr2.length) result.push(arr2[i]);
+                  }
+                  return result;
+                }
 
-                // รวมโพสต์ตามลำดับ: โพสต์ตัวเองเรียงเวลา → คนอื่นใกล้เคียง → คนอื่นไกล
-                const finalPosts = [...ownPosts, ...otherPostsClose, ...otherPostsFar];
+                const finalPosts = interleavePosts(otherPostsClose, otherPostsFar);
 
+                // ส่งผลลัพธ์
                 res.status(200).json(finalPosts);
               });
             });
@@ -154,6 +166,7 @@ router.get("/get", (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
+
 
 
 
