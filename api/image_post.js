@@ -17,7 +17,6 @@ router.get("/get", (req, res) => {
       return res.status(400).json({ error: "Target uid is required" });
     }
 
-    // ดึงข้อมูล user เป้าหมาย
     const userSql = `SELECT * FROM user WHERE uid = ?`;
     conn.query(userSql, [targetUid], (err, targetResults) => {
       if (err) return res.status(400).json({ error: 'Target user query error' });
@@ -25,7 +24,6 @@ router.get("/get", (req, res) => {
 
       const targetUser = targetResults[0];
 
-      // ดึงโพสต์ทั้งหมด
       const postSql = `
         SELECT 
           post.*, 
@@ -42,7 +40,6 @@ router.get("/get", (req, res) => {
         if (err) return res.status(400).json({ error: 'Post query error' });
         if (postResults.length === 0) return res.status(404).json({ error: 'No posts found' });
 
-        // ดึง images, categories, hashtags, likes
         const imageSql = `SELECT * FROM image_post`;
         conn.query(imageSql, (err, imageResults) => {
           if (err) return res.status(400).json({ error: 'Image query error' });
@@ -72,12 +69,13 @@ router.get("/get", (req, res) => {
                 if (err) return res.status(400).json({ error: 'Like count query error' });
 
                 const likeMap = {};
-                likeResults.forEach(item => { likeMap[item.post_id] = item.like_count; });
+                likeResults.forEach(item => likeMap[item.post_id] = item.like_count);
 
                 const sizeMap = { XS: 1, S: 2, M: 3, L: 4, XL: 5, XXL: 6 };
                 function calcDistance(u1, u2) {
                   const shirt1 = sizeMap[u1.shirt_size] || 0;
                   const shirt2 = sizeMap[u2.shirt_size] || 0;
+
                   return Math.sqrt(
                     Math.pow((u1.height || 0) - (u2.height || 0), 2) +
                     Math.pow((u1.weight || 0) - (u2.weight || 0), 2) +
@@ -88,12 +86,13 @@ router.get("/get", (req, res) => {
                   );
                 }
 
-                // เตรียม postsWithData
                 const postsWithData = postResults.map(post => {
                   const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
-                  const categories = categoryResults.filter(cat => cat.post_id_fk === post.post_id)
+                  const categories = categoryResults
+                    .filter(cat => cat.post_id_fk === post.post_id)
                     .map(cat => ({ cid: cat.cid, cname: cat.cname, cimage: cat.cimage, ctype: cat.ctype }));
-                  const hashtags = hashtagResults.filter(ht => ht.post_id_fk === post.post_id)
+                  const hashtags = hashtagResults
+                    .filter(ht => ht.post_id_fk === post.post_id)
                     .map(ht => ({ tag_id: ht.tag_id, tag_name: ht.tag_name }));
 
                   return {
@@ -130,25 +129,20 @@ router.get("/get", (req, res) => {
                   };
                 });
 
-                // เรียงตามเวลาโพสต์ล่าสุดก่อน
-                postsWithData.sort((a, b) => new Date(b.post.post_date) - new Date(a.post.post_date));
+                // แยกโพสต์
+                const ownPosts = postsWithData.filter(p => p.is_own_post)
+                                              .sort((a, b) => new Date(b.post.post_date) - new Date(a.post.post_date));
 
-                // ปรับความใกล้เคียง (optional): ถ้าโพสต์ตัวเองและโพสต์อื่นเวลาใกล้กัน ≤ 1 วัน สามารถสลับตาม similarity
-                const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-                for (let i = 0; i < postsWithData.length - 1; i++) {
-                  const current = postsWithData[i];
-                  const next = postsWithData[i + 1];
-                  const timeDiff = Math.abs(new Date(current.post.post_date) - new Date(next.post.post_date));
+                const otherPostsClose = postsWithData.filter(p => !p.is_own_post && p.similarity_distance <= 10) // เลือก threshold ใกล้เคียง
+                                                     .sort((a, b) => a.similarity_distance - b.similarity_distance);
 
-                  if (!current.is_own_post && next.is_own_post && timeDiff <= ONE_DAY_MS) {
-                    if (current.similarity_distance > next.similarity_distance) {
-                      postsWithData[i] = next;
-                      postsWithData[i + 1] = current;
-                    }
-                  }
-                }
+                const otherPostsFar = postsWithData.filter(p => !p.is_own_post && p.similarity_distance > 10)
+                                                   .sort((a, b) => new Date(b.post.post_date) - new Date(a.post.post_date));
 
-                res.status(200).json(postsWithData);
+                // รวมโพสต์ตามลำดับ: โพสต์ตัวเองเรียงเวลา → คนอื่นใกล้เคียง → คนอื่นไกล
+                const finalPosts = [...ownPosts, ...otherPostsClose, ...otherPostsFar];
+
+                res.status(200).json(finalPosts);
               });
             });
           });
@@ -160,6 +154,7 @@ router.get("/get", (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
+
 
 
 
