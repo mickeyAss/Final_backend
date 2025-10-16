@@ -810,7 +810,6 @@ router.get('/by-category/:cid', (req, res) => {
 });
 
 
-
 // API ดึงโพสต์ทั้งหมดที่ user กดไลก์ พร้อมข้อมูลครบถ้วนของโพสต์นั้น ๆ
 router.get('/liked-posts/full/:user_id', (req, res) => {
   const { user_id } = req.params;
@@ -823,7 +822,7 @@ router.get('/liked-posts/full/:user_id', (req, res) => {
     pl.created_at AS liked_at
   FROM post_likes pl
   JOIN post p ON pl.post_id_fk = p.post_id
-  JOIN user u ON p.post_fk_uid = u.uid
+  JOIN \`user\` u ON p.post_fk_uid = u.uid
   WHERE pl.user_id_fk = ?
   ORDER BY pl.created_at DESC
   `;
@@ -921,7 +920,6 @@ router.get('/liked-posts/full/:user_id', (req, res) => {
     });
   });
 });
-
 
 // API GET /saved-posts/full/:user_id
 router.get('/saved-posts/full/:user_id', (req, res) => {
