@@ -1060,8 +1060,8 @@ router.get('/following-posts/:user_id', (req, res) => {
   }
 
   try {
-    // Query ดึงโพสต์ของคนที่เรากำลังติดตาม พร้อมข้อมูลผู้ใช้และ status
-    // แสดงเฉพาะโพสต์ที่ status = 'public' หรือ status = 'friends' (หากผู้ติดตามอยู่ใน friends)
+    // Query ดึงโพสต์ของคนที่เรากำลังติดตาม พร้อมข้อมูลผู้ใช้
+    // แสดงโพสต์ทั้งหมด (public และ friends)
     const postSql = `
       SELECT 
         post.*, 
@@ -1070,20 +1070,27 @@ router.get('/following-posts/:user_id', (req, res) => {
       FROM post
       JOIN user ON post.post_fk_uid = user.uid
       JOIN user_followers uf ON user.uid = uf.following_id
-      WHERE uf.follower_id = ? AND post.post_status = 'public'
+      WHERE uf.follower_id = ? 
       ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC
     `;
 
     conn.query(postSql, [user_id], (err, postResults) => {
-      if (err) return res.status(400).json({ error: 'Post query error' });
+      if (err) {
+        console.error('Post query error:', err);
+        return res.status(400).json({ error: 'Post query error' });
+      }
 
-      if (postResults.length === 0)
+      if (postResults.length === 0) {
         return res.status(404).json({ error: 'No posts found from people you follow' });
+      }
 
       // ดึงรูปภาพทั้งหมดจากตาราง image_post
       const imageSql = `SELECT * FROM image_post`;
       conn.query(imageSql, (err, imageResults) => {
-        if (err) return res.status(400).json({ error: 'Image query error' });
+        if (err) {
+          console.error('Image query error:', err);
+          return res.status(400).json({ error: 'Image query error' });
+        }
 
         // ดึงหมวดหมู่ของโพสต์จากตาราง post_category และ category
         const categorySql = `
@@ -1092,7 +1099,10 @@ router.get('/following-posts/:user_id', (req, res) => {
           JOIN category c ON pc.category_id_fk = c.cid
         `;
         conn.query(categorySql, (err, categoryResults) => {
-          if (err) return res.status(400).json({ error: 'Category query error' });
+          if (err) {
+            console.error('Category query error:', err);
+            return res.status(400).json({ error: 'Category query error' });
+          }
 
           // ดึงแฮชแท็กของโพสต์จาก post_hashtags และ hashtags
           const hashtagSql = `
@@ -1101,7 +1111,10 @@ router.get('/following-posts/:user_id', (req, res) => {
             JOIN hashtags h ON ph.hashtag_id_fk = h.tag_id
           `;
           conn.query(hashtagSql, (err, hashtagResults) => {
-            if (err) return res.status(400).json({ error: 'Hashtag query error' });
+            if (err) {
+              console.error('Hashtag query error:', err);
+              return res.status(400).json({ error: 'Hashtag query error' });
+            }
 
             // ดึงจำนวนไลก์แต่ละโพสต์จากตาราง post_likes
             const likeSql = `
@@ -1110,7 +1123,10 @@ router.get('/following-posts/:user_id', (req, res) => {
               GROUP BY post_id_fk
             `;
             conn.query(likeSql, (err, likeResults) => {
-              if (err) return res.status(400).json({ error: 'Like count query error' });
+              if (err) {
+                console.error('Like count query error:', err);
+                return res.status(400).json({ error: 'Like count query error' });
+              }
 
               // สร้างแผนที่จำนวนไลก์สำหรับแต่ละโพสต์
               const likeMap = {};
@@ -1144,7 +1160,7 @@ router.get('/following-posts/:user_id', (req, res) => {
                     post_description: post.post_description,
                     post_date: post.post_date,
                     post_fk_uid: post.post_fk_uid,
-                    post_status: post.post_status, // ✅ เพิ่ม post_status
+                    post_status: post.post_status,
                     amount_of_like: likeMap[post.post_id] || 0,
                     amount_of_save: post.amount_of_save,
                     amount_of_comment: post.amount_of_comment,
@@ -1170,11 +1186,10 @@ router.get('/following-posts/:user_id', (req, res) => {
       });
     });
   } catch (err) {
-    console.log(err);
+    console.error('Server error:', err);
     return res.status(500).json({ error: 'Server error' });
   }
 });
-
 
 // PUT หรือ PATCH สำหรับอัพเดตสถานะอ่าน notification
 // API อัปเดต is_read ของ notification
