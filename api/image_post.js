@@ -1060,7 +1060,8 @@ router.get('/following-posts/:user_id', (req, res) => {
   }
 
   try {
-    // Query ดึงโพสต์ของคนที่เรากำลังติดตาม พร้อมข้อมูลผู้ใช้ (ตัดข้อมูลส่วนสูง น้ำหนัก และขนาดต่างๆ ออก)
+    // Query ดึงโพสต์ของคนที่เรากำลังติดตาม พร้อมข้อมูลผู้ใช้และ status
+    // แสดงเฉพาะโพสต์ที่ status = 'public' หรือ status = 'friends' (หากผู้ติดตามอยู่ใน friends)
     const postSql = `
       SELECT 
         post.*, 
@@ -1069,7 +1070,7 @@ router.get('/following-posts/:user_id', (req, res) => {
       FROM post
       JOIN user ON post.post_fk_uid = user.uid
       JOIN user_followers uf ON user.uid = uf.following_id
-      WHERE uf.follower_id = ?
+      WHERE uf.follower_id = ? AND post.post_status = 'public'
       ORDER BY DATE(post.post_date) DESC, TIME(post.post_date) DESC
     `;
 
@@ -1117,7 +1118,7 @@ router.get('/following-posts/:user_id', (req, res) => {
                 likeMap[item.post_id] = item.like_count;
               });
 
-              // รวมข้อมูลโพสต์, ผู้ใช้, รูปภาพ, หมวดหมู่, แฮชแท็ก, และจำนวนไลก์
+              // รวมข้อมูลโพสต์, ผู้ใช้, รูปภาพ, หมวดหมู่, แฮชแท็ก, จำนวนไลก์ และ status
               const postsWithData = postResults.map(post => {
                 const images = imageResults.filter(img => img.image_fk_postid === post.post_id);
                 const categories = categoryResults
@@ -1143,6 +1144,7 @@ router.get('/following-posts/:user_id', (req, res) => {
                     post_description: post.post_description,
                     post_date: post.post_date,
                     post_fk_uid: post.post_fk_uid,
+                    post_status: post.post_status, // ✅ เพิ่ม post_status
                     amount_of_like: likeMap[post.post_id] || 0,
                     amount_of_save: post.amount_of_save,
                     amount_of_comment: post.amount_of_comment,
